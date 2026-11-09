@@ -1,0 +1,14 @@
+[Unit]
+Description=QD330 printer control dashboard (port 8000)
+After=network-online.target
+
+[Service]
+WorkingDirectory=@REPO@/services/qd330-dashboard
+EnvironmentFile=-%h/.config/qd330-web.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m printer_control.web
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

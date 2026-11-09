@@ -1,0 +1,18 @@
+{
+  "_comment": "UNVERIFIED Afinia QD330 guess for OrcaSlicer CLI. Values mirror qd330-pla-0.2mm.ini. Replace start/end G-code with the official Afinia preamble before printing.",
+  "type": "machine",
+  "name": "Morphix Afinia QD330 0.4 nozzle (UNVERIFIED)",
+  "from": "User",
+  "instantiation": "true",
+  "printer_technology": "FFF",
+  "gcode_flavor": "marlin",
+  "z_offset": "-0.05",
+  "printable_area": ["-110x-110", "110x-110", "110x110", "-110x110"],
+  "printable_height": "220",
+  "nozzle_diameter": ["0.4"],
+  "retraction_length": ["1"],
+  "retraction_speed": ["30"],
+  "use_relative_e_distances": "0",
+  "machine_start_gcode": "; Morphix UNVERIFIED generic start G-code\nM140 S[bed_temperature_initial_layer_single]\nM104 S[nozzle_temperature_initial_layer]\nG90\nM82\nG28\nM190 S[bed_temperature_initial_layer_single]\n;MORPHIX_LEVEL_BED\nM109 S[nozzle_temperature_initial_layer]\nG92 E0\nG1 X-100 Y-100 F3000\nG1 Z0.4 F600\n; purge: 2 x 200 mm at 150% flow (0.15 mm filament per mm)\nG1 X100 Y-100 E30 F600\nG1 Y-99.2 F600\nG1 X-100 Y-99.2 E60 F600\nG92 E0\n",
+  "machine_end_gcode": "; Morphix UNVERIFIED generic end G-code\nM104 S0\nM140 S0\nM107\nG91\nG1 E-2 F1800\nG1 Z10 F600\nG90\nG28 X Y\nM84\n"
+}

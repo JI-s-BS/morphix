@@ -1,0 +1,16 @@
+node_modules/
+apps/desktop/dist/
+apps/remote/dist/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.env
+.env.*
+!**/*.env.example
+!**/.env.example
+*.sqlite
+*.sqlite-*
+*.log
+*.tsbuildinfo
+.DS_Store

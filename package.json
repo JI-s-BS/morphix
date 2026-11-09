@@ -1,0 +1,51 @@
+{
+  "name": "morphix",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Morphix: AI-powered, voice-controlled 3D printing (Phase 1 foundation)",
+  "main": "apps/desktop/dist/main.cjs",
+  "scripts": {
+    "build:main": "node scripts/build-main.mjs",
+    "build:renderer": "vite build --config apps/desktop/vite.config.ts",
+    "build:remote": "vite build --config apps/remote/vite.config.ts",
+    "build": "npm run build:main && npm run build:renderer",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "dev:renderer": "vite --config apps/desktop/vite.config.ts",
+    "dev:remote": "vite --config apps/remote/vite.config.ts --port 5174",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "pg": "8.13.1",
+    "qrcode": "^1.5.4",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "sql.js": "1.12.0",
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/pg": "8.11.10",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@types/sql.js": "1.4.11",
+    "@types/three": "0.170.0",
+    "@vitejs/plugin-react": "4.7.0",
+    "electron": "45.2.3",
+    "esbuild": "0.24.2",
+    "typescript": "5.6.3",
+    "vite": "5.4.21",
+    "vitest": "2.1.9"
+  },
+  "overrides": {
+    "@babel/core": "7.29.7",
+    "@babel/generator": "7.29.1",
+    "@babel/parser": "7.29.12"
+  },
+  "allowScripts": {
+    "electron@45.2.3": true,
+    "esbuild@0.24.2": true,
+    "esbuild@0.21.5": true
+  }
+}

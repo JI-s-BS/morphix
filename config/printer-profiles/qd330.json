@@ -1,0 +1,23 @@
+{
+  "id": "afinia-qd330",
+  "name": "Afinia 3D QD330",
+  "firmware": "v2.1.3",
+  "network": { "host": "192.168.10.51", "controlPort": 8899, "cameraPort": 8080 },
+  "buildVolumeMm": { "x": 220, "y": 220, "z": 220 },
+  "buildVolumeSource": "M115 firmware report; confirm against the official Afinia spec before slicing",
+  "camera": {
+    "stream": "http://192.168.10.51:8080/?action=stream",
+    "snapshot": "http://192.168.10.51:8080/?action=snapshot",
+    "server": "MJPG-Streamer/0.2",
+    "resolution": "1280x720"
+  },
+  "verified": {
+    "readStatus": "M119/M105/M114/M27 over TCP 8899 — verified",
+    "listFiles": "M661 — verified",
+    "home": "G28 — verified (physical motion)",
+    "upload": "M28/M29 framed packets — file accepted; plain .g job stalled at 0%",
+    "directMotion": "G1 over network — accepted but ignored",
+    "pauseResumeCancel": "M25/M24/M26 — M26 verified cancelling a stalled job; others unverified",
+    "printFormat": "unverified — compare with official Afinia slicer .gx output (Phase 3)"
+  }
+}
