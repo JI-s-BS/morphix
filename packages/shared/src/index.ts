@@ -182,7 +182,7 @@ export interface AppSettings {
   cameraSnapshotUrl: string;
   printerPollSeconds: number;
   demoMode: boolean;
-  keys: Record<"gemini" | "meshy" | "claude" | "vultr" | "tiger" | "swarms" | "auth0", boolean>;
+  keys: Record<"gemini" | "meshy" | "claude", boolean>;
   printControlsEnabled: false;
 }
 
@@ -461,8 +461,6 @@ export interface MorphixApi {
   machineCommand(command: MachineCommand): Promise<{ ok: boolean; message: string; code?: string }>;
   machineCapabilities(): Promise<MachineCapability[]>;
   jobs(): Promise<JobView[]>;
-  portalInfo(): Promise<{ running: boolean; url: string | null; authConfigured: boolean; missing: string[] }>;
-  remotePairing(): Promise<{ running: boolean; qrDataUrl: string | null; expiresAt: string | null; message?: string }>;
   latestPrintJob(projectId: string): Promise<PrepareSummary | null>;
   requestPrint(jobId: string): Promise<void>;
   printStatus(): Promise<PrintControlStatus>;

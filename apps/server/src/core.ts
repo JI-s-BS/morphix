@@ -131,7 +131,8 @@ export async function createCore(o: CoreOptions): Promise<Core> {
 
   const active = await resolveActivePrinter(config, store, { lookup: o.driverLookup, deps: { log: (level, message, data) => log.write(level === "debug" ? "info" : level, `[driver] ${message}`, data) } });
   const driverMode = active.kind === "driver";
-  const PRINTER_HOST = driverMode ? String(active.printer.connection.host ?? "") : env("MORPHIX_PRINTER_HOST") || "192.168.10.51";
+  // No printer configured and no legacy MORPHIX_PRINTER_HOST: nothing is polled until one is set up.
+  const PRINTER_HOST = driverMode ? String(active.printer.connection.host ?? "") : env("MORPHIX_PRINTER_HOST") || "";
   const CAMERA_BASE = `http://${PRINTER_HOST}:8080`;
   const POLL_SECONDS = Number(env("MORPHIX_PRINTER_POLL_SECONDS") || 5);
   const GEMINI_MODEL = env("MORPHIX_GEMINI_MODEL") || DEFAULT_LIVE_MODEL;
@@ -221,7 +222,7 @@ export async function createCore(o: CoreOptions): Promise<Core> {
   if (active.kind === "driver") driverObserver = new DriverObserver(active.connection, onPrinterStatus);
   const driverControl = active.kind === "driver" && driverObserver ? new DriverControl(active.connection, active.printer, driverObserver) : null;
   const printer: { readonly status: PrinterStatus; poll(): Promise<PrinterStatus>; start(ms: number): void; stop(): void; info(): Promise<import("@morphix/shared").PrinterInfo> } =
-    driverObserver ?? new PrinterObserver(printing.controller.transport, onPrinterStatus);
+    driverObserver ?? (PRINTER_HOST ? new PrinterObserver(printing.controller.transport, onPrinterStatus) : noPrinter());
 
   const onGenerationFinished = (info: FinishedInfo): void => {
     if (info.ok) {
@@ -374,10 +375,6 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       meshy: has("MESHY_API_KEY"),
       claude: has("ANTHROPIC_API_KEY"),
       // Removed integrations (always off; the fields stay until the Settings page drops them).
-      vultr: false,
-      tiger: false,
-      swarms: false,
-      auth0: false,
     },
     printControlsEnabled: false,
   });
@@ -599,8 +596,6 @@ export async function createCore(o: CoreOptions): Promise<Core> {
   handle(IPC.machineCapabilities, () => (driverControl ? driverControl.capabilities() : printing.capabilities()));
   handle(IPC.jobs, () => jobs.list());
   // The Auth0 portal and the phone app were removed: this Morphix's own address works on phones.
-  handle(IPC.portalInfo, () => ({ running: false, url: null, authConfigured: false, missing: [] }));
-  handle(IPC.remotePairing, () => ({ running: false, qrDataUrl: null, expiresAt: null, message: "Open this Morphix's web address on your phone instead." }));
   handle(IPC.latestPrintJob, (projectId: string) => printing.latest(safeId(String(projectId))));
   handle(IPC.requestPrint, (jobId: string) => {
     try {
@@ -680,7 +675,7 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       if (cleared.messages || cleared.recordings) log.write("info", "chat cleared on start", cleared);
       log.write("info", "Morphix starting", {
         version: o.version, storage: storage.root,
-        printer: active.kind === "driver" ? `${active.printer.name} (${active.driver.id})` : `QD330 ${PRINTER_HOST} (${active.reason})`,
+        printer: active.kind === "driver" ? `${active.printer.name} (${active.driver.id})` : PRINTER_HOST ? `QD330 ${PRINTER_HOST} (${active.reason})` : "none set up",
         assistant: voice.enabled ? GEMINI_MODEL : "missing", generator: meshy ? MESHY_MODEL : "missing",
         resumable: resumable.length, printControls: PRINT_CONTROLS, gxVerified: GX_VERIFIED,
       });
@@ -716,5 +711,17 @@ export async function createCore(o: CoreOptions): Promise<Core> {
         log.write("error", "db close failed", { error: (e as Error).message });
       }
     },
+  };
+}
+
+/** Stands in for the printer until one is added on the setup page: offline, never polls the network. */
+function noPrinter() {
+  const status = (): PrinterStatus => ({ online: false, checkedAt: new Date().toISOString(), error: "No printer set up yet: add one in Settings → System setup." });
+  return {
+    get status() { return status(); },
+    poll: async () => status(),
+    start: () => {},
+    stop: () => {},
+    info: async () => ({}),
   };
 }

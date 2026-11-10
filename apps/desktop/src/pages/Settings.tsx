@@ -7,7 +7,7 @@ import { useTheme, type ThemeChoice } from "../theme";
 import { SystemSetup, useSetupSession } from "./setup";
 
 const KEY_LABELS: Record<keyof AppSettings["keys"], string> = {
-  gemini: "Gemini", meshy: "Meshy", claude: "Claude", vultr: "Vultr", tiger: "Tiger Data", swarms: "Swarms", auth0: "Auth0",
+  gemini: "Gemini", meshy: "Meshy", claude: "Claude",
 };
 
 export function SettingsPage({ settings, onError }: { settings: AppSettings | null; onError: (m: string) => void }) {
@@ -31,14 +31,10 @@ function General({ settings, onError }: { settings: AppSettings | null; onError:
   const [logs, setLogs] = useState<string[]>([]);
   const [balance, setBalance] = useState<string>("–");
   const [gemini, setGemini] = useState<string | null>(null);
-  const [portal, setPortal] = useState<{ running: boolean; url: string | null; authConfigured: boolean; missing: string[] } | null>(null);
-  const [remote, setRemote] = useState<{ running: boolean; qrDataUrl: string | null; expiresAt: string | null; message?: string } | null>(null);
 
   const refresh = () => {
     api.getSystemInfo().then(setSys);
     api.recentLogs(80).then(setLogs);
-    api.portalInfo().then(setPortal).catch(() => {});
-    api.remotePairing().then(setRemote).catch(() => {});
     if (settings?.keys.meshy) api.meshyBalance().then((r) => setBalance("balance" in r ? `${r.balance} credits` : r.error));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -93,22 +89,8 @@ function General({ settings, onError }: { settings: AppSettings | null; onError:
         </div>
       </div>
       <div className="card">
-        <h3>📱 Morphix Remote</h3>
-        <div className="stat"><span className="muted">Remote access</span><span style={{ color: remote?.running ? "var(--ok)" : "var(--bad)" }}>{remote ? (remote.running ? "Ready" : "Not running") : "–"}</span></div>
-        {remote?.qrDataUrl ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 10 }}>
-            <img src={remote.qrDataUrl} alt="Scan to pair a phone with Morphix Remote" style={{ width: 180, height: 180, borderRadius: 12, background: "white", padding: 4 }} />
-            <div><b>Scan with your phone camera</b><p className="muted small">The secure link pairs this phone once, then immediately expires. No account, password, or typed code.</p><button className="btn ghost" style={{ minHeight: 40 }} onClick={refresh}>New QR</button></div>
-          </div>
-        ) : <div className="muted small" style={{ marginTop: 8 }}>{remote?.message ?? "Loading pairing QR…"}</div>}
-      </div>
-      <div className="card">
-        <h3>🌐 Web portal</h3>
-        <div className="stat"><span className="muted">Address</span><span>{portal?.url ?? "–"}</span></div>
-        <div className="stat"><span className="muted">Running</span><span style={{ color: portal?.running ? "var(--ok)" : "var(--bad)" }}>{portal ? (portal.running ? "Yes" : "No") : "–"}</span></div>
-        <div className="stat"><span className="muted">Auth0 login</span><span style={{ color: portal?.authConfigured ? "var(--ok)" : "var(--warn)" }}>{portal ? (portal.authConfigured ? "Set up" : "Needs setup") : "–"}</span></div>
-        {portal && !portal.authConfigured && <div className="muted small" style={{ marginTop: 4 }}>Missing: {portal.missing.join(", ")}</div>}
-        <div className="muted small" style={{ marginTop: 4 }}>Open it on a phone on the same Wi-Fi to send photos.</div>
+        <h3>🌐 Use it from other devices</h3>
+        <div className="muted small">Open <b>{typeof location !== "undefined" && location.protocol.startsWith("http") ? location.origin : "http://<this machine>:8080"}</b> in any browser on the same network and sign in.</div>
       </div>
       <div className="card">
         <h3>Storage</h3>

@@ -38,8 +38,6 @@ export const IPC = {
   machineCommand: "printer:machine",
   machineCapabilities: "printer:capabilities",
   jobs: "jobs:list",
-  portalInfo: "portal:info",
-  remotePairing: "remote:pairing",
   latestPrintJob: "print:latest",
   requestPrint: "print:request",
   printStatus: "print:status",
