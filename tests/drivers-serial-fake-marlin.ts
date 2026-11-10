@@ -18,6 +18,8 @@ export interface FakeMarlinOptions {
   /** M27 reply. */
   sdPrinting?: [number, number];
   extruders?: number;
+  /** Called before each "busy" line (tests advance a fake clock here). */
+  onBusy?: () => void;
 }
 
 export class FakeMarlin implements SerialPortHandle {
@@ -35,6 +37,10 @@ export class FakeMarlin implements SerialPortHandle {
   private corrupted = new Set<number>();
   private queue: Promise<void> = Promise.resolve();
   closed = false;
+  /** True while the fake is stopped on a held command (see hold()). */
+  holding = false;
+  private holdOn?: string;
+  private releaseHold?: () => void;
 
   constructor(private o: FakeMarlinOptions = {}) {
     setTimeout(() => this.emit("start"), 1);
@@ -63,6 +69,20 @@ export class FakeMarlin implements SerialPortHandle {
   unplug(): void {
     this.closed = true;
     for (const l of this.closeL) l(new Error("unplugged"));
+  }
+
+  /** The next command starting with `prefix` is executed but not answered until release(). */
+  hold(prefix: string): void {
+    this.holdOn = prefix;
+  }
+
+  release(): void {
+    this.holdOn = undefined;
+    this.releaseHold?.();
+  }
+
+  setOptions(o: Partial<FakeMarlinOptions>): void {
+    Object.assign(this.o, o);
   }
 
   emit(line: string): void {
@@ -112,10 +132,16 @@ export class FakeMarlin implements SerialPortHandle {
       this.emit("Error:Printer halted. kill() called!");
       return;
     }
+    if (this.holdOn && cmd.startsWith(this.holdOn)) {
+      this.holding = true;
+      await new Promise<void>((r) => { this.releaseHold = r; });
+      this.holding = false;
+    }
     const busy = Object.entries(this.o.busy ?? {}).find(([k]) => cmd.startsWith(k));
     if (busy) {
       for (let i = 0; i < busy[1]; i++) {
-        await this.wait(5);
+        await this.wait(1);
+        this.o.onBusy?.();
         this.emit("echo:busy: processing");
       }
     }

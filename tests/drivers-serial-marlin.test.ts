@@ -20,7 +20,9 @@ import { getDriver } from "../packages/printer/src/drivers/registry";
 import type { DriverConfig, PrinterConnection } from "../packages/printer/src/drivers/types";
 import { FakeMarlin, type FakeMarlinOptions } from "./drivers-serial-fake-marlin";
 
-const fast = { bootWaitMs: 20, handshakeTimeoutMs: 200, commandTimeoutMs: 1000, okTimeoutMs: 2000, tempPollMs: 50, retryMs: 0 };
+// Generous protocol timeouts so a loaded machine (the full suite runs in parallel) cannot trip them;
+// the tests below wait on conditions (fake.hold / until), never on fixed sleeps.
+const fast = { bootWaitMs: 20, handshakeTimeoutMs: 2000, commandTimeoutMs: 5000, okTimeoutMs: 10_000, tempPollMs: 50, retryMs: 0 };
 const PORT = "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0";
 
 let dir: string;
@@ -38,7 +40,8 @@ function setup(fakeOpts: FakeMarlinOptions = {}, config: DriverConfig = {}) {
     ...fast,
     storeDir: dir,
     openPort: async () => {
-      const f = new FakeMarlin(fakeOpts);
+      // Auto-report by default: no M105 polling interleaved with the commands the tests look at.
+      const f = new FakeMarlin({ autoReportTemp: true, ...fakeOpts });
       fakes.push(f);
       return f;
     },
@@ -49,7 +52,7 @@ function setup(fakeOpts: FakeMarlinOptions = {}, config: DriverConfig = {}) {
   return { driver, conn, fake: () => fakes[fakes.length - 1] };
 }
 
-async function until(cond: () => boolean | Promise<boolean>, ms = 3000): Promise<void> {
+async function until(cond: () => boolean | Promise<boolean>, ms = 15_000): Promise<void> {
   const end = Date.now() + ms;
   while (!(await cond())) {
     if (Date.now() > end) throw new Error("timed out waiting");
@@ -113,7 +116,7 @@ describe("marlin wire format", () => {
   });
 });
 
-describe("marlin-serial driver", () => {
+describe("marlin-serial driver", { timeout: 30_000 }, () => {
   it("is registered with fields and help text", () => {
     expect(SERIAL_DRIVERS.map((d) => d.id)).toEqual(["marlin-serial", "ultimaker", "snapmaker"]);
     const d = getDriver("marlin-serial")!;
@@ -175,7 +178,9 @@ describe("marlin-serial driver", () => {
   });
 
   it("status() and test() never throw when the printer does not answer", async () => {
-    const { conn } = setup({ silent: true });
+    const driver = createMarlinSerialDriver({ ...fast, handshakeTimeoutMs: 50, storeDir: dir, openPort: async () => new FakeMarlin({ silent: true }) });
+    const conn = driver.connect({ port: PORT });
+    conns.push(conn);
     const r = await conn.test();
     expect(r).toMatchObject({ ok: false, code: "timeout" });
     expect((r as { hint?: string }).hint).toMatch(/baud/);
@@ -183,16 +188,18 @@ describe("marlin-serial driver", () => {
   });
 
   it("streams a job with numbered lines, reports progress, and finishes idle", async () => {
-    const { conn, fake } = setup({ okDelayMs: 1 });
+    const { conn, fake } = setup();
+    await conn.test();
+    fake().hold("G1 X20 ");
     await conn.upload({ name: "cube.gcode", data: gcode(40), format: "gcode" });
     await conn.start("cube.gcode");
-    await until(async () => {
-      const s = await conn.status();
-      return s.state === "printing" && (s.job?.progress ?? 0) > 0.2;
-    });
+    await until(() => fake().holding);
     const mid = await conn.status();
+    expect(mid.state).toBe("printing");
     expect(mid.job?.file).toBe("cube.gcode");
-    expect(mid.job!.progress!).toBeLessThan(1);
+    // G28, M109, G1 X0..X19 (+ M104 S0 at the end): 22 of 43 commands acknowledged.
+    expect(mid.job?.progress).toBeCloseTo(22 / 43);
+    fake().release();
     await until(async () => (await conn.status()).state === "idle");
     expect((await conn.status()).message).toBe("Finished cube.gcode");
     const ex = fake().executed;
@@ -205,23 +212,37 @@ describe("marlin-serial driver", () => {
     }
   });
 
+  it("shows 'heating' while an M109 wait is in flight", async () => {
+    const { conn, fake } = setup();
+    await conn.test();
+    fake().hold("M109");
+    await conn.upload({ name: "h.gcode", data: gcode(3), format: "gcode" });
+    await conn.start("h.gcode");
+    await until(() => fake().holding);
+    expect((await conn.status()).state).toBe("heating");
+    fake().release();
+    await until(async () => (await conn.status()).state === "idle");
+  });
+
   it("replays lines on Resend after a checksum error", async () => {
     const { conn, fake } = setup();
     await conn.test();
-    const firstJobN = fake().received.filter((l) => l.startsWith("N")).length; // lines used by handshake etc.
+    // Numbered lines so far are N0..N(k-1); start() sends M27 as Nk, then the job: G28, M109, G1 X0, G1 X1 ...
+    const k = fake().received.filter((l) => l.startsWith("N")).length;
+    const corrupt = k + 4;
+    fake().setOptions({ corrupt: [corrupt] });
     await conn.upload({ name: "a.gcode", data: gcode(10), format: "gcode" });
     await conn.start("a.gcode");
-    const corrupt = firstJobN + 3;
-    // Corrupt one of the job lines: set after start so the fake rejects its first copy.
-    (fake() as unknown as { o: FakeMarlinOptions }).o.corrupt = [corrupt];
     await until(async () => (await conn.status()).state === "idle");
     const ex = fake().executed.filter((c) => c.startsWith("G1 X"));
     expect(ex).toEqual(Array.from({ length: 10 }, (_, i) => `G1 X${i} Y${i} E${i / 10}`));
-    expect(fake().received.filter((l) => l.startsWith(`N${corrupt} `)).length).toBe(2);
+    const copies = fake().received.filter((l) => l.startsWith(`N${corrupt} `));
+    expect(copies).toEqual([copies[0], copies[0]]);
+    expect(copies[0]).toMatch(/^N\d+ G1 X1 /);
   });
 
   it("recovers from a forced checksum error on a numbered line", async () => {
-    const { conn, fake } = setup({ corrupt: [3], autoReportTemp: true });
+    const { conn, fake } = setup({ corrupt: [3] });
     await conn.test();
     await conn.sendGcode!("M114");
     await conn.sendGcode!("M114");
@@ -233,37 +254,47 @@ describe("marlin-serial driver", () => {
   });
 
   it("treats busy: as keep-alive during long commands (no lost-ok nudge)", async () => {
-    const fake = new FakeMarlin({ busy: { G28: 10 }, autoReportTemp: true });
-    const driver = createMarlinSerialDriver({ ...fast, okTimeoutMs: 25, storeDir: dir, openPort: async () => fake });
-    const conn = driver.connect({ port: PORT });
+    // A test clock: each "busy" line advances it 20 ms, the ok timeout is 50 ms, the whole G28 takes 300 ms.
+    let clock = 0;
+    const fake = new FakeMarlin({ busy: { G28: 15 }, autoReportTemp: true, onBusy: () => { clock += 20; } });
+    const driver = createMarlinSerialDriver({ ...fast, okTimeoutMs: 50, storeDir: dir, openPort: async () => fake });
+    const conn = driver.connect({ port: PORT }, { now: () => clock });
     conns.push(conn);
     await conn.test();
     expect(await conn.sendGcode!("G28")).toMatch(/busy: processing[\s\S]*ok/);
+    expect(clock).toBe(300);
     expect(fake.executed.filter((c) => c === "G28").length).toBe(1);
     expect(fake.received.filter((l) => l === "M105")).toEqual([]);
   });
 
   it("nudges with an unnumbered M105 when an ok goes missing", async () => {
+    let clock = 0;
     const fake = new FakeMarlin({ autoReportTemp: true });
-    const driver = createMarlinSerialDriver({ ...fast, okTimeoutMs: 30, storeDir: dir, openPort: async () => fake });
-    const conn = driver.connect({ port: PORT });
+    const driver = createMarlinSerialDriver({ ...fast, okTimeoutMs: 50, storeDir: dir, openPort: async () => fake });
+    const conn = driver.connect({ port: PORT }, { now: () => clock });
     conns.push(conn);
     await conn.test();
-    (fake as unknown as { o: FakeMarlinOptions }).o.silent = true;
+    fake.setOptions({ silent: true });
     const reply = conn.sendGcode!("M400");
-    await new Promise((r) => setTimeout(r, 80));
-    (fake as unknown as { o: FakeMarlinOptions }).o.silent = false;
-    expect(fake.received).toContain("M105");
+    await until(() => fake.received.some((l) => l.startsWith("N") && l.includes("M400")));
+    clock += 100;
+    await until(() => fake.received.includes("M105"));
+    fake.setOptions({ silent: false });
     fake.emit("ok");
     await expect(reply).resolves.toBe("ok");
   });
 
   it("refuses to start unless idle", async () => {
-    const { conn } = setup({ okDelayMs: 2 });
-    await conn.upload({ name: "a.gcode", data: gcode(200), format: "gcode" });
+    const { conn, fake } = setup();
+    await conn.test();
+    fake().hold("G1 X1 ");
+    await conn.upload({ name: "a.gcode", data: gcode(20), format: "gcode" });
     await conn.start("a.gcode");
     await expect(conn.start("a.gcode")).rejects.toMatchObject({ code: "busy" });
-    await conn.cancel();
+    await until(() => fake().holding);
+    const c = conn.cancel();
+    fake().release();
+    await c;
   });
 
   it("refuses to start while the printer runs its own SD card print", async () => {
@@ -281,76 +312,98 @@ describe("marlin-serial driver", () => {
     await expect(conn.upload({ name: "a.3mf", data: Buffer.from("x"), format: "gcode.3mf" })).rejects.toMatchObject({ code: "unsupported" });
   });
 
+  const jobLines = (f: FakeMarlin) => f.executed.filter((c) => c.startsWith("G1 X")).length;
+
   it("pauses by stopping the stream (no moves by default) and resumes", async () => {
-    const { conn, fake } = setup({ okDelayMs: 2 });
+    const { conn, fake } = setup();
+    await conn.test();
+    fake().hold("G1 X10 ");
     await conn.upload({ name: "a.gcode", data: gcode(100), format: "gcode" });
     await conn.start("a.gcode");
-    await until(() => fake().executed.filter((c) => c.startsWith("G1 X")).length > 5);
+    await until(() => fake().holding);
     await conn.pause();
     expect((await conn.status()).state).toBe("paused");
-    await new Promise((r) => setTimeout(r, 30));
-    const count = fake().executed.length;
-    await new Promise((r) => setTimeout(r, 40));
-    expect(fake().executed.length).toBe(count);
+    // The line already in flight (G1 X10) completes; nothing after it is sent while paused.
+    const sentBefore = fake().received.length;
+    fake().release();
+    await conn.sendGcode!("M114"); // a full round trip after the held line's ok
+    expect(jobLines(fake())).toBe(11);
+    expect(fake().received.length).toBe(sentBefore + 1);
+    expect((await conn.status()).state).toBe("paused");
     expect(fake().executed.filter((c) => /^G1 Z|^G91/.test(c))).toEqual([]);
     await conn.resume();
-    await until(async () => (await conn.status()).state === "idle", 5000);
-    expect(fake().executed.filter((c) => c.startsWith("G1 X")).length).toBe(100);
+    await until(async () => (await conn.status()).state === "idle");
+    expect(jobLines(fake())).toBe(100);
   });
 
   it("runs the user's park G-code on pause when configured", async () => {
-    const { conn, fake } = setup({ okDelayMs: 2 }, { pauseGcode: "G91\\nG1 Z10\\nG90", resumeGcode: "G91\\nG1 Z-10\\nG90" });
+    const { conn, fake } = setup({}, { pauseGcode: "G91\\nG1 Z10\\nG90", resumeGcode: "G91\\nG1 Z-10\\nG90" });
+    await conn.test();
+    fake().hold("G1 X3 ");
     await conn.upload({ name: "a.gcode", data: gcode(100), format: "gcode" });
     await conn.start("a.gcode");
-    await until(() => fake().executed.filter((c) => c.startsWith("G1 X")).length > 3);
-    await conn.pause();
-    expect(fake().executed.slice(-3)).toEqual(["G91", "G1 Z10", "G90"]);
+    await until(() => fake().holding);
+    const paused = conn.pause();
+    fake().release();
+    await paused;
+    expect(fake().executed.slice(-4)).toEqual(["G1 X3 Y3 E0.3", "G91", "G1 Z10", "G90"]);
+    fake().hold("G1 X4 ");
     await conn.resume();
-    await conn.cancel();
+    await until(() => fake().holding);
+    expect(fake().executed.slice(-4)).toEqual(["G91", "G1 Z-10", "G90", "G1 X4 Y4 E0.4"]);
+    const c = conn.cancel();
+    fake().release();
+    await c;
   });
 
   it("cancel stops streaming, then heaters off, fan off, motors off, with no moves", async () => {
-    const { conn, fake } = setup({ okDelayMs: 2, extruders: 2 });
+    const { conn, fake } = setup({ extruders: 2 });
+    await conn.test();
+    fake().hold("G1 X10 ");
     await conn.upload({ name: "a.gcode", data: gcode(300), format: "gcode" });
     await conn.start("a.gcode");
-    await until(() => fake().executed.filter((c) => c.startsWith("G1 X")).length > 5);
-    await conn.cancel();
+    await until(() => fake().holding);
+    const c = conn.cancel();
+    fake().release();
+    await c;
     const ex = fake().executed;
-    const at = ex.indexOf("M108");
-    expect(at).toBeGreaterThan(0);
-    const after = ex.slice(at);
-    expect(after).toEqual(["M108", "M104 T0 S0", "M104 T1 S0", "M140 S0", "M107", "M84"]);
-    expect(ex.filter((c) => c.startsWith("G1 X")).length).toBeLessThan(300);
+    const at = ex.indexOf("G1 X10 Y10 E1");
+    expect(ex.slice(at)).toEqual(["G1 X10 Y10 E1", "M108", "M104 T0 S0", "M104 T1 S0", "M140 S0", "M107", "M84"]);
+    expect(jobLines(fake())).toBe(11);
     const s = await conn.status();
     expect(s.state).toBe("idle");
     expect(s.message).toBe("Cancelled a.gcode");
-    await new Promise((r) => setTimeout(r, 30));
-    expect(fake().executed.slice(at + after.length).filter((c) => /^G/.test(c))).toEqual([]);
+    await conn.sendGcode!("M114");
+    expect(jobLines(fake())).toBe(11);
   });
 
   it("a firmware halt stops streaming and reports an error", async () => {
-    const { conn, fake } = setup({ okDelayMs: 1, haltOn: "G1 X5 " });
+    const { conn, fake } = setup({ haltOn: "G1 X5 " });
     await conn.upload({ name: "a.gcode", data: gcode(50), format: "gcode" });
     await conn.start("a.gcode");
     await until(async () => (await conn.status()).state === "error");
     const s = await conn.status();
     expect(s.message).toMatch(/Thermal Runaway/);
-    const n = fake().received.length;
-    await new Promise((r) => setTimeout(r, 30));
-    expect(fake().received.length).toBe(n);
-    expect(fake().executed.filter((c) => c.startsWith("G1 X")).length).toBe(6);
+    // One line at a time: nothing was sent after the line that halted it.
+    expect(fake().received[fake().received.length - 1]).toMatch(/^N\d+ G1 X5 /);
+    expect(jobLines(fake())).toBe(6);
     await expect(conn.start("a.gcode")).rejects.toMatchObject({ code: "busy" });
     expect(await conn.test()).toMatchObject({ ok: false, code: "protocol" });
+    expect(fake().received[fake().received.length - 1]).toMatch(/^N\d+ G1 X5 /);
   });
 
   it("reports a lost USB connection during a print as an error", async () => {
-    const { conn, fake } = setup({ okDelayMs: 2 });
+    const { conn, fake } = setup();
+    await conn.test();
+    fake().hold("G1 X10 ");
     await conn.upload({ name: "a.gcode", data: gcode(200), format: "gcode" });
     await conn.start("a.gcode");
-    await until(() => fake().executed.length > 10);
-    fake().unplug();
+    await until(() => fake().holding);
+    const lost = fake();
+    lost.unplug();
     // status() reconnects to a fresh (rebooted) fake; the lost print stays reported until cleared.
     const s = await conn.status();
+    expect(fake()).not.toBe(lost);
     expect(s.state).toBe("error");
     expect(s.message).toMatch(/USB connection lost/);
     await conn.cancel();
