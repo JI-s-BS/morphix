@@ -14,6 +14,9 @@ import { clampSpeed, clampZOffset, MAX_Z_OFFSET_MM, MIN_Z_OFFSET_MM, profileZOff
 import { preparePrint } from "@morphix/slicing";
 import { toMorphixError } from "@morphix/errors";
 import { JobTracker, PrintAuthorizer, QD330Controller, detectActivePrint, isPausedStatus, remainingSeconds, type ApprovalSource, type MachineApprovalSource, type RequestedBy, type UnverifiedCommandFlags } from "@morphix/printer";
+import type { PrinterModel } from "@morphix/catalog";
+import type { DriverStatus, FileFormat, PrinterConnection } from "@morphix/printer";
+import type { SliceJob, SliceOutput } from "@morphix/slicing";
 import { PrintGuardian, applyGuardianSchema, geminiVisionFromEnv, type GuardianSnapshot, type GuardianStore } from "@morphix/guardian";
 import { type Ctx, now } from "./context";
 import type { Jobs } from "./jobs";
@@ -28,7 +31,32 @@ export interface PrintingOptions {
   allowUnverified: UnverifiedCommandFlags;
   /** Bed leveling before each print (default: the printer's own routine; see packages/slicing/src/leveling.ts). */
   leveling?: LevelingPlan;
+  /** A printer from the setup page (PrinterDriver). Unset: the Afinia QD330 path below. */
+  target?: DriverTarget;
 }
+
+/**
+ * A configured printer reached through its driver (apps/server/src/printers.ts). Prepare slices
+ * for its catalog model with a slicer adapter; an approved print is uploaded and started through
+ * the connection. Only ever after the user confirmed that print.
+ */
+export interface DriverTarget {
+  /** The user's name for it ("Garage Ender"). */
+  name: string;
+  model: PrinterModel;
+  connection: PrinterConnection;
+  /** Slices with the best installed adapter for the model. */
+  slice(job: SliceJob): Promise<{ out: SliceOutput; slicer: string | null }>;
+  /** Polls the printer now. */
+  state(): Promise<DriverStatus | null>;
+  /** Last polled state (no network). */
+  lastState(): DriverStatus | null;
+  /** Status checks while waiting for a print to start (default 2 s × 15). */
+  startChecks?: { everyMs: number; times: number };
+}
+
+const EXTENSION: Record<FileFormat, string> = { gcode: "gcode", gx: "gx", "gcode.3mf": "gcode.3mf", ufp: "ufp" };
+const ACTIVE_DRIVER_STATES = new Set<DriverStatus["state"]>(["printing", "heating", "paused", "finishing", "busy"]);
 
 /** Map the advisor/slicer stage names to the shared job stage keys. */
 const STAGE_KEY: Record<string, string> = {
@@ -221,9 +249,12 @@ export class Printing {
         // Library designs are exported print-ready: keep the designer's orientation (and, with
         // no target height, their exact size — bearings and screws depend on it).
         ...(v.source === "library" ? { orientation: "keep" as const } : {}),
+        // A driver printer: place on its own bed and stop after the mesh stages (its slicer adapter slices).
+        ...(this.o.target ? { buildVolume: { x: this.o.target.model.bed.x, y: this.o.target.model.bed.y, z: this.o.target.model.bed.z }, slice: false } : {}),
       };
       let r: PreparePrintResult;
       let advice: PrepareSummary["advice"];
+      let applied: { perimeters?: number; brimWidthMm?: number } = {};
       if (auto) {
         const a = await prepareWithAdvice({
           inputPath: main,
@@ -235,6 +266,7 @@ export class Printing {
           onProgress: onStage,
         });
         r = a;
+        applied = { perimeters: a.applied.perimeters, brimWidthMm: a.applied.brimWidthMm };
         s.layerHeightMm = a.advice.layerHeightMm;
         s.infillPercent = a.advice.infillPercent;
         s.supports = a.advice.supports;
@@ -246,7 +278,9 @@ export class Printing {
         r = await preparePrint({ inputPath: main, targetHeightMm: target, options: { ...options, supports: s.supports, layerHeightMm: s.layerHeightMm, infillPercent: s.infillPercent, onProgress: onStage } });
       }
       const fileName = `morphix-${jobId.slice(0, 8)}.gx`;
-      summary = {
+      if (this.o.target) {
+        summary = await this.prepareForDriver(this.o.target, r, { jobId, projectId, versionId, t, s, advice, applied, outDir, onStage });
+      } else summary = {
         jobId, projectId, versionId, createdAt: t, settings: s, ok: r.ok && r.fits.fits,
         size: r.size, fits: r.fits.fits, upAxis: r.upAxis.axis,
         repairs: r.repair ? describeRepair(r.repair as unknown as Record<string, unknown>) : [],
@@ -263,11 +297,15 @@ export class Printing {
       if (summary.ok) {
         this.jobs?.finishRemaining(trackId);
       } else {
-        const failKey = !r.fits.fits ? "prepare.orient" : !r.slicer.ok ? "prepare.slice" : "prepare.gx";
-        this.jobs?.fail(trackId, failKey, new Error(!r.fits.fits ? "model is too large for the build volume" : r.slicer.ok ? (r.gx.ok ? "not ready" : r.gx.message) : r.slicer.message), summary.errorCode ?? "MX-SLICE-001");
+        const slicerFailed = this.o.target ? !summary.slicer.ok : !r.slicer.ok;
+        const failKey = !r.fits.fits ? "prepare.orient" : slicerFailed || this.o.target ? "prepare.slice" : "prepare.gx";
+        const why = !r.fits.fits ? "model is too large for the build volume"
+          : this.o.target ? summary.slicer.message ?? summary.gx.reason ?? "not ready"
+          : r.slicer.ok ? (r.gx.ok ? "not ready" : r.gx.message) : r.slicer.message;
+        this.jobs?.fail(trackId, failKey, new Error(why), summary.errorCode ?? "MX-SLICE-001");
       }
       db.run("UPDATE print_jobs SET state = ?, file_rel_path = ?, summary_json = ?, updated_at = ? WHERE id = ?", [
-        summary.ok ? "ready_for_approval" : "prepare_incomplete", r.files.gx ? storage.relative(r.files.gx) : null, JSON.stringify(summary), now(), jobId,
+        summary.ok ? "ready_for_approval" : "prepare_incomplete", this.o.target ? this.driverFiles.get(jobId) ?? null : r.files.gx ? storage.relative(r.files.gx) : null, JSON.stringify(summary), now(), jobId,
       ]);
       walk(this.ctx, projectId, summary.ok ? ["slicing", "approval"] : ["sizing"]);
       this.ctx.log.write("info", "print prepared", { jobId, ok: summary.ok, slicer: summary.slicer, fits: summary.fits, estimates: summary.estimates });
@@ -287,6 +325,221 @@ export class Printing {
     return summary;
   }
 
+  // -------------------------------------------------------------------------
+  // Driver printers (a printer from the setup page, through its PrinterDriver)
+
+  /** Printable file per prepared job (relative path), for print_jobs.file_rel_path. */
+  private driverFiles = new Map<string, string>();
+  /** The print Morphix started on a driver printer and is following. */
+  private driverJob: { jobId: string; fileName: string; seenActive: boolean; lastProgress: number; sawFinishing: boolean; cancelRequested: boolean } | null = null;
+
+  /** Slices the placed STL for the driver printer's model and builds the summary the Prepare page shows. */
+  private async prepareForDriver(
+    target: DriverTarget,
+    r: PreparePrintResult,
+    c: { jobId: string; projectId: string; versionId: string; t: string; s: PrepareSettings; advice: PrepareSummary["advice"]; applied: { perimeters?: number; brimWidthMm?: number }; outDir: string; onStage: (stage: string) => void },
+  ): Promise<PrepareSummary> {
+    const { s } = c;
+    if (s.speedMmS) s.speedMmS = Math.min(s.speedMmS, target.model.maxSpeedMmS ?? s.speedMmS);
+    const base = {
+      jobId: c.jobId, projectId: c.projectId, versionId: c.versionId, createdAt: c.t, settings: s,
+      size: r.size, fits: r.fits.fits, upAxis: r.upAxis.axis,
+      repairs: r.repair ? describeRepair(r.repair as unknown as Record<string, unknown>) : [],
+      issues: r.report.final.issues ?? [],
+      warnings: [...r.warnings],
+      previewUrl: null,
+      advice: c.advice,
+    };
+    if (!r.fits.fits) {
+      return { ...base, ok: false, slicer: { ok: false, reason: "too-large", message: r.fits.message }, estimates: { ...r.estimates }, gx: { ok: false, verified: false, reason: r.fits.message }, errorCode: "MX-SLICE-004" };
+    }
+    c.onStage("slice");
+    const { out, slicer } = await target.slice({
+      modelPath: r.files.stl,
+      outDir: join(c.outDir, "slice"),
+      printer: target.model,
+      filament: s.filament as FilamentId,
+      layerHeightMm: s.layerHeightMm,
+      infillPercent: s.infillPercent,
+      supports: s.supports,
+      ...(c.applied.perimeters !== undefined ? { perimeters: c.applied.perimeters } : {}),
+      ...(c.applied.brimWidthMm ? { brimWidthMm: c.applied.brimWidthMm } : {}),
+      ...(s.speedMmS ? { speedMmS: s.speedMmS } : {}),
+      ...(s.zOffsetMm !== undefined ? { zOffsetMm: s.zOffsetMm } : {}),
+    });
+    if (!out.ok) {
+      return {
+        ...base, ok: false,
+        slicer: { ok: false, reason: out.reason, message: out.message },
+        estimates: { ...r.estimates },
+        gx: { ok: false, verified: false, reason: out.message },
+        errorCode: toMorphixError(new Error(out.message), "MX-SLICE-002").code,
+      };
+    }
+    const fileName = `morphix-${c.jobId.slice(0, 8)}.${EXTENSION[out.format] ?? "gcode"}`;
+    // Keep the printable file inside this job's folder whatever the adapter did.
+    const data = readFileSync(out.printablePath);
+    const kept = join(c.outDir, fileName);
+    this.ctx.storage.writeAtomic(kept, data);
+    const bytes = data.length;
+    this.driverFiles.set(c.jobId, this.ctx.storage.relative(kept));
+    return {
+      ...base,
+      ok: true,
+      warnings: [...base.warnings, ...out.warnings],
+      slicer: { ok: true, name: slicer ?? undefined },
+      estimates: { printTimeS: out.estimatedTimeS ?? null, filamentMm: out.filamentMm ?? null, filamentG: null, layerCount: null, source: "slicer" },
+      // The printable file for this printer (the field is named after the QD330's .gx).
+      gx: { ok: true, verified: true, fileName, bytes },
+    };
+  }
+
+  private driverProposal(target: DriverTarget, jobId: string): Omit<PendingAction, "id" | "createdAt"> {
+    const r = this.ctx.db.get("SELECT * FROM print_jobs WHERE id = ?", [jobId]);
+    if (!r?.summary_json || !r.file_rel_path) throw new Error("prepare the model for printing first");
+    const s = JSON.parse(String(r.summary_json)) as PrepareSummary;
+    if (!s.ok || !s.gx.ok || !s.gx.fileName) throw new Error("this print job isn't ready (see the preparation report)");
+    const caps = target.connection.capabilities();
+    if (!caps.upload || !caps.startPrint) throw new Error(`Morphix can't start prints on ${target.name} with this connection. Copy the file to the printer and start it there.`);
+    if (!caps.fileFormats.includes(target.model.fileFormat)) throw new Error(`${target.name} doesn't accept ${target.model.fileFormat} files over this connection.`);
+    if (this.driverJob) throw new Error("the printer is already printing");
+    const st = target.lastState();
+    if (!st || st.state === "offline") throw new Error(`${target.name} is offline. Check it is on and connected, then try again.`);
+    if (st.state !== "idle") throw new Error(`${target.name} is ${st.state}. Wait until it is idle, then try again.`);
+    const project = this.ctx.db.get("SELECT title FROM projects WHERE id = ?", [r.project_id]);
+    const est = s.estimates;
+    const filament = filamentProfile(s.settings.filament).label;
+    return {
+      kind: "print", title: String(project?.title ?? "model"), prompt: `Send ${s.gx.fileName} to ${target.name} and start printing.`,
+      projectId: String(r.project_id), versionId: String(r.version_id), credits: 0, jobId, fileName: s.gx.fileName,
+      details: [
+        s.size ? `${s.size.x.toFixed(0)} × ${s.size.y.toFixed(0)} × ${s.size.z.toFixed(0)} mm` : "",
+        est?.printTimeS ? `about ${formatDuration(est.printTimeS)}` : "",
+        s.settings.filament && s.settings.filament !== this.loadedFilament()
+          ? `⚠️ Sliced for ${filament} but ${filamentProfile(this.loadedFilament()).label} is loaded — change the filament first.`
+          : "",
+        `Check the bed of ${target.name} is clear and ${filament} is loaded.`,
+      ].filter(Boolean),
+    };
+  }
+
+  /** Upload + start through the driver. Runs only from a confirmed pending action. */
+  private async startDriverPrint(target: DriverTarget, jobId: string, approvedBy: ApprovalSource): Promise<void> {
+    const proposal = this.driverProposal(target, jobId); // re-check every precondition
+    const fresh = await target.state();
+    if (fresh?.state !== "idle") throw new Error(`${target.name} is ${fresh?.state ?? "not answering"}, so the print was not sent.`);
+    const fileName = proposal.fileName!;
+    const r = this.ctx.db.get("SELECT * FROM print_jobs WHERE id = ?", [jobId])!;
+    const data = this.ctx.storage.read(this.ctx.storage.path(String(r.file_rel_path)));
+    const projectId = String(r.project_id);
+    this.busy = "sending file to printer";
+    this.emitStatus();
+    this.printJobView = this.jobs?.create("print", `Printing ${proposal.title}`, approvedBy, { jobId, fileName }, { approval: false }).id ?? null;
+    this.jobs?.start(this.printJobView, "send", fileName);
+    try {
+      this.ctx.db.run("UPDATE print_jobs SET state = 'uploading', approved_at = ?, updated_at = ? WHERE id = ?", [now(), now(), jobId]);
+      walk(this.ctx, projectId, ["uploading"], { printControlsEnabled: true, userApproved: true });
+      await target.connection.upload({ name: fileName, data, format: target.model.fileFormat });
+      walk(this.ctx, projectId, ["ready"], { printControlsEnabled: true, userApproved: true });
+      this.jobs?.done(this.printJobView, "send");
+      this.busy = "starting print";
+      this.emitStatus();
+      await target.connection.start(fileName);
+      this.driverJob = { jobId, fileName, seenActive: false, lastProgress: 0, sawFinishing: false, cancelRequested: false };
+      this.activeJobId = jobId;
+      walk(this.ctx, projectId, ["printing"], { printControlsEnabled: true, userApproved: true });
+      this.ctx.db.run("UPDATE print_jobs SET state = 'printing', updated_at = ? WHERE id = ?", [now(), jobId]);
+      this.jobs?.start(this.printJobView, "print", "Heating up and starting");
+      // Confirm the printer really started; a slow heat-up is fine, silence is reported plainly.
+      const { everyMs, times } = target.startChecks ?? { everyMs: 2000, times: 15 };
+      let started = false;
+      for (let i = 0; i < times && !started; i++) {
+        await new Promise((ok) => setTimeout(ok, everyMs));
+        const st = await target.state();
+        if (st) this.onDriverStatus(st);
+        started = !!st && ACTIVE_DRIVER_STATES.has(st.state);
+      }
+      this.lastMessage = started ? `Printing ${fileName}` : `${target.name} accepted ${fileName} but hasn't reported printing yet. Check its screen.`;
+      this.ctx.log.write(started ? "info" : "warn", "driver print started", { jobId, file: fileName, confirmed: started });
+    } catch (e) {
+      this.lastMessage = (e as Error).message;
+      const stage = this.jobs?.manager.get(this.printJobView ?? "")?.stages.find((x) => x.status === "running")?.key ?? "send";
+      this.jobs?.fail(this.printJobView, stage, e, "MX-PRINT-001");
+      this.printJobView = null;
+      this.driverJob = null;
+      this.activeJobId = null;
+      this.ctx.db.run("UPDATE print_jobs SET state = 'failed', updated_at = ? WHERE id = ?", [now(), jobId]);
+      walk(this.ctx, projectId, ["failed"], { printControlsEnabled: true });
+      throw e;
+    } finally {
+      this.busy = null;
+      this.ctx.db.flush();
+      this.emitStatus();
+    }
+  }
+
+  /** Every driver poll: follows the print Morphix started until the printer is idle again. */
+  onDriverStatus(st: DriverStatus | null): void {
+    const j = this.driverJob;
+    if (!st || !j) {
+      if (st) this.emitStatus();
+      return;
+    }
+    if (ACTIVE_DRIVER_STATES.has(st.state)) {
+      j.seenActive = true;
+      if (st.state === "finishing") j.sawFinishing = true;
+      if (typeof st.job?.progress === "number") j.lastProgress = st.job.progress;
+      if (st.state === "printing" && this.printJobView) {
+        this.jobs?.update(this.printJobView, "print", Math.round(j.lastProgress * 100), st.job?.layer?.[1] ? `Layer ${st.job.layer[0]} of ${st.job.layer[1]}` : undefined);
+      }
+    } else if (j.seenActive && (st.state === "idle" || st.state === "error")) {
+      const ev = j.cancelRequested ? "cancelled" : st.state === "idle" && (j.sawFinishing || j.lastProgress >= 0.95) ? "completed" : "failed";
+      this.ctx.log.write("info", `print ${ev}`, { jobId: j.jobId, file: j.fileName, state: st.state });
+      this.driverJob = null;
+      this.finishJob(j.jobId, ev);
+      if (ev === "completed") {
+        this.jobs?.done(this.printJobView, "print");
+        this.jobs?.done(this.printJobView, "done");
+        this.lastMessage = `${j.fileName} finished`;
+      } else if (ev === "cancelled") {
+        this.jobs?.cancel(this.printJobView, "You ended the print");
+        this.lastMessage = "Print cancelled";
+      } else {
+        this.jobs?.fail(this.printJobView, "print", new Error(st.message ?? "the print stopped before the end"), "MX-PRINT-001");
+        this.lastMessage = `The print stopped: ${st.message ?? "the printer went idle before the end"}`;
+      }
+      this.printJobView = null;
+    }
+    this.emitStatus();
+  }
+
+  /** The user asked to cancel the driver print (the next idle status then means "cancelled"). */
+  noteCancelRequested(): void {
+    if (this.driverJob) this.driverJob.cancelRequested = true;
+    this.tracker.noteCancelRequested();
+  }
+
+  private driverStatus(target: DriverTarget): PrintControlStatus {
+    const st = target.lastState();
+    const caps = target.connection.capabilities();
+    const active = !!st && ACTIVE_DRIVER_STATES.has(st.state);
+    const j = this.driverJob;
+    return {
+      enabled: caps.upload && caps.startPrint,
+      gxVerified: true,
+      job: active
+        ? {
+            jobId: j?.jobId, fileName: st!.job?.file ?? j?.fileName, phase: st!.state,
+            progress: Math.round((st!.job?.progress ?? 0) * 100), layer: st!.job?.layer ?? [0, 0],
+            recovered: !j, offline: false, elapsedS: st!.job?.elapsedS ?? null, remainingS: st!.job?.remainingS ?? null,
+            estimateS: j ? this.estimateFor(j.jobId, undefined) : null,
+          }
+        : null,
+      busy: this.busy,
+      lastMessage: this.lastMessage,
+    };
+  }
+
   latest(projectId: string): PrepareSummary | null {
     const r = this.ctx.db.get("SELECT summary_json FROM print_jobs WHERE project_id = ? AND summary_json IS NOT NULL ORDER BY created_at DESC LIMIT 1", [projectId]);
     return r ? (JSON.parse(String(r.summary_json)) as PrepareSummary) : null;
@@ -296,6 +549,7 @@ export class Printing {
   // Phase 5 — printing (two operator switches + explicit approval per print)
 
   status(): PrintControlStatus {
+    if (this.o.target) return this.driverStatus(this.o.target);
     const j = this.tracker.job;
     return {
       enabled: this.o.controlsEnabled,
@@ -439,6 +693,7 @@ export class Printing {
 
   /** Checks a print may be proposed; returns the details for the confirmation screen. */
   printProposal(jobId: string): Omit<PendingAction, "id" | "createdAt"> {
+    if (this.o.target) return this.driverProposal(this.o.target, jobId);
     if (!this.o.controlsEnabled) {
       throw new Error("Printer control is locked. It is switched on only after the operator validation checklist (MORPHIX_PRINT_CONTROLS=1).");
     }
@@ -470,6 +725,7 @@ export class Printing {
 
   /** Runs only from a confirmed pending action (touch tap or verified spoken yes). */
   async startApprovedPrint(jobId: string, approvedBy: ApprovalSource): Promise<void> {
+    if (this.o.target) return this.startDriverPrint(this.o.target, jobId, approvedBy);
     const proposal = this.printProposal(jobId); // re-check every precondition
     const fileName = proposal.fileName!;
     const r = this.ctx.db.get("SELECT * FROM print_jobs WHERE id = ?", [jobId])!;

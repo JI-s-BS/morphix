@@ -64,8 +64,14 @@ With a driver printer:
 - Temperatures are clamped to the catalog model's `maxNozzleC` / `maxBedC`, and refused for an unknown model or an offline printer.
 - The camera comes from `capabilities().camera`.
 - QD330 control is forced off.
-- **Starting a print on a driver printer is not wired yet.** `requestPrint` returns a plain message, because `Printing.prepare` still produces QD330 `.gx`.
-  Integration should route `prepare` through the slicer adapters and upload with `connection.upload/start`.
+- **Printing on a driver printer** (`Printing` with a `DriverTarget`, apps/desktop/electron/printing.ts):
+  - **Prepare:** the mesh stages run with the catalog model's `bed` as the build volume. The placed STL then goes to a slicer adapter (`apps/server/src/slicers.ts`, contract only). It tries `config.slicer.preferred` first and only installed adapters that `supports(model)`. The printable file is copied into `prints/<job>/morphix-<id>.<ext>`.
+  - **Request:** the proposal needs `upload` + `startPrint` capabilities, the model's file format, and the printer `idle`.
+  - **Confirm:** the printer is polled again and must still be idle. Then `upload({name, data, format})`, then `start(name)`. The print is confirmed by status (printing/heating/busy) or reported plainly if the printer stays silent.
+  - **Tracking:** driver polls follow the job until it ends. Idle after finishing or ≥95 % counts as completed; a cancel from Morphix is recorded as cancelled; anything else is failed with the printer's message. Morphix uploads and starts files only after the user confirms.
+  - **Not covered:** the guardian is not auto-started for driver printers, because its camera path is QD330-only.
+  - **For integration:** the adapters come from `SLICERS` exported by `@morphix/slicing` (the slicers session has it in `adapters/index.ts`; `packages/slicing/src/index.ts` must re-export it). Until then, prepare says "No slicer in Morphix can make … yet".
+  - **Tests:** `tests/server-driver-print.test.ts` runs the real core end to end with a fake driver and adapter.
 
 ## Removed (item 7)
 - `apps/remote/`, `packages/remote/` (Auth0 phone app), `vercel.json`.

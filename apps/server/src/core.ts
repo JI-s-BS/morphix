@@ -32,7 +32,10 @@ import { cadGeneratorFromEnv } from "../../desktop/electron/cad";
 import { startBusyMarker } from "../../desktop/electron/busy";
 import { appSelfHealDeps, installSelfHealing } from "../../desktop/electron/self-heal";
 import { HandlerRegistry } from "./registry";
+import { findPrinter } from "@morphix/catalog";
+import type { SlicerAdapter } from "@morphix/slicing";
 import { DriverControl, DriverObserver, resolveActivePrinter, type ActivePrinter } from "./printers";
+import { createDriverSlicer, installedAdapters } from "./slicers";
 
 export interface CoreOptions {
   /** Data dir (Storage root). */
@@ -46,6 +49,10 @@ export interface CoreOptions {
   config?: MorphixConfig | null;
   /** Test seam: replaces the driver registry lookup. */
   driverLookup?: (id: string) => PrinterDriver | undefined;
+  /** Test seam: slicer adapters (default: packages/slicing's SLICERS). */
+  slicers?: SlicerAdapter[];
+  /** Test seam: how often / how long to wait for a driver print to report it started. */
+  driverStartChecks?: { everyMs: number; times: number };
 }
 
 export interface Core {
@@ -54,6 +61,8 @@ export interface Core {
   log: Logger;
   version: string;
   active: ActivePrinter;
+  /** Shared module context (database, storage, events). */
+  ctx: Ctx;
   /** The printer camera's own addresses (proxied as /api/camera/*). */
   camera(): { stream: string | null; snapshot: string | null };
   /** Opens the database and starts polling. */
@@ -157,7 +166,24 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       return levelingPlan();
     }
   };
+  // A printer from the setup page: its driver, polled by DriverObserver, sliced for its catalog model.
+  let driverObserver: DriverObserver | null = null;
+  const model = active.kind === "driver" ? findPrinter(active.printer.modelId) : undefined;
+  if (active.kind === "driver" && !model) log.write("warn", "printer model not in the catalog: printing from Morphix is off", { modelId: active.printer.modelId });
+  const driverSlice = createDriverSlicer(o.slicers ?? installedAdapters(), { preferred: config?.slicer?.preferred, paths: config?.slicer?.paths });
+  const target = active.kind === "driver" && model
+    ? {
+        name: active.printer.name,
+        model,
+        connection: active.connection,
+        slice: driverSlice,
+        state: async () => (driverObserver ? (await driverObserver.poll(), driverObserver.driverStatus) : null),
+        lastState: () => driverObserver?.driverStatus ?? null,
+        startChecks: o.driverStartChecks,
+      }
+    : undefined;
   const printing = new Printing(ctx, {
+    target,
     repoRoot: o.repoRoot,
     printerHost: PRINTER_HOST || "127.0.0.1",
     controlsEnabled: PRINT_CONTROLS,
@@ -179,12 +205,11 @@ export async function createCore(o: CoreOptions): Promise<Core> {
   // The printer: a configured driver, or the QD330 (all its traffic through the controller's queue).
   const onPrinterStatus = (s: PrinterStatus, prev: PrinterStatus): void => {
     send(IPC.printerStatusEvent, s);
-    if (!driverMode) {
-      try {
-        printing.onPrinterStatus(s);
-      } catch (e) {
-        log.write("warn", "print tracking error", { error: (e as Error).message });
-      }
+    try {
+      if (driverMode) printing.onDriverStatus(driverObserver?.driverStatus ?? null);
+      else printing.onPrinterStatus(s);
+    } catch (e) {
+      log.write("warn", "print tracking error", { error: (e as Error).message });
     }
     if (!ctx.db) return;
     if (s.online !== prev.online || s.machine !== prev.machine) {
@@ -193,7 +218,7 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       log.write("info", `printer ${kind}`, s.error ? { error: s.error } : undefined);
     }
   };
-  const driverObserver = active.kind === "driver" ? new DriverObserver(active.connection, onPrinterStatus) : null;
+  if (active.kind === "driver") driverObserver = new DriverObserver(active.connection, onPrinterStatus);
   const driverControl = active.kind === "driver" && driverObserver ? new DriverControl(active.connection, active.printer, driverObserver) : null;
   const printer: { readonly status: PrinterStatus; poll(): Promise<PrinterStatus>; start(ms: number): void; stop(): void; info(): Promise<import("@morphix/shared").PrinterInfo> } =
     driverObserver ?? new PrinterObserver(printing.controller.transport, onPrinterStatus);
@@ -282,10 +307,15 @@ export async function createCore(o: CoreOptions): Promise<Core> {
   };
   actions.printer = {
     proposal: (jobId) => {
-      if (driverMode) throw new Error("Starting prints on this printer from Morphix isn't wired up yet. Send the sliced file from the printer's own app or screen for now.");
+      if (driverMode && !target) throw new Error("Pick your printer's model on the setup page so Morphix can slice for it.");
       return printing.printProposal(jobId);
     },
     start: (jobId, by) => printing.startApprovedPrint(jobId, by),
+  };
+  const cancelPrint = () => {
+    if (!driverControl) return printing.cancel();
+    printing.noteCancelRequested();
+    return driverControl.cancel();
   };
   const voice = new VoiceController(ctx, actions, {
     apiKey: feature("voice") && has("GEMINI_API_KEY") ? env("GEMINI_API_KEY") : undefined,
@@ -310,7 +340,7 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       voice.localSpeechContext(text);
       return true;
     },
-    cancelPrint: () => (driverControl ? driverControl.cancel() : printing.cancel()),
+    cancelPrint: () => cancelPrint(),
     keepPrinting: () => void printing.guardianCommand("dismiss"),
     resolveAlert: () => void printing.guardianCommand("resolve"),
     userBusy: () => voice.busy,
@@ -579,10 +609,10 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       throw new Error(friendly(e));
     }
   });
-  handle(IPC.printStatus, () => (driverControl ? driverControl.status() : printing.status()));
+  handle(IPC.printStatus, () => printing.status());
   handle(IPC.pausePrint, () => (driverControl ? driverControl.pause() : printing.pause()));
   handle(IPC.resumePrint, () => (driverControl ? driverControl.resume() : printing.resume("touch")));
-  handle(IPC.cancelPrint, () => (driverControl ? driverControl.cancel() : printing.cancel()));
+  handle(IPC.cancelPrint, () => cancelPrint());
   handle(IPC.uiPage, (page: string) => voice.setPage(String(page)));
   handle(IPC.filaments, () => printing.filaments());
   handle(IPC.setLoadedFilament, (id: string) => printing.setLoadedFilament(String(id)));
@@ -634,7 +664,7 @@ export async function createCore(o: CoreOptions): Promise<Core> {
   let started = false;
 
   return {
-    registry, storage, log, version: o.version, active, camera,
+    registry, storage, log, version: o.version, active, camera, ctx,
     async start() {
       if (started) return;
       started = true;
@@ -676,6 +706,9 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       voice.close();
       await printing.shutdown().catch(() => {});
       if (active.kind === "driver") await active.connection.close().catch(() => {});
+      // Save the progress jobs now (they are debounced), then stop saving.
+      await jobs.manager.flush().catch(() => {});
+      jobs.manager.dispose();
       try {
         ctx.db?.flush();
         ctx.db?.close();
