@@ -1,0 +1,662 @@
+#!/usr/bin/env bash
+# morphix: manage an installed Morphix server (see docs/INSTALL.md).
+#
+#   morphix status | start | stop | restart | logs [-f] [-n N]
+#   morphix update [--channel stable|main] [--skip-tests] [--force] [--wait MIN] [--auto]
+#   morphix rollback [<release>] | doctor | version
+#   morphix backup [-o FILE] [--include-secrets] | restore FILE [--yes]
+#   morphix reset-admin | auto-update on|off|status
+#
+# Installed by scripts/install/install.sh to /usr/local/bin (system) or ~/.local/bin (--user).
+# Everything is a function; `main` runs at the very end. Tests source this file with
+# MORPHIX_CLI_SOURCE_ONLY=1 and call the functions directly.
+set -euo pipefail
+
+MORPHIX_CLI_VERSION="1.0.0"
+DEFAULT_REPO_URL="https://github.com/JI-s-BS/morphix.git"
+KEEP_RELEASES=3
+BUSY_STALE_SECONDS=30
+
+# ------------------------------------------------------------------ output ---
+say() { printf '%s\n' "$*"; }
+warn() { printf 'warning: %s\n' "$*" >&2; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+# check results for doctor: ok / bad with a fix hint
+ok() { printf '  [ok]   %s\n' "$1"; }
+bad() { printf '  [FAIL] %s\n         fix: %s\n' "$1" "$2"; DOCTOR_FAILS=$((DOCTOR_FAILS + 1)); }
+note() { printf '  [warn] %s\n         hint: %s\n' "$1" "$2"; }
+
+# ------------------------------------------------------------------ config ---
+# install.conf is plain KEY=VALUE lines written by install.sh. It is parsed, never sourced.
+conf_path() {
+  if [[ -n "${MORPHIX_INSTALL_CONF:-}" ]]; then printf '%s\n' "$MORPHIX_INSTALL_CONF"; return; fi
+  local user_conf="${XDG_CONFIG_HOME:-$HOME/.config}/morphix/install.conf"
+  if [[ "${MORPHIX_SCOPE:-}" == user ]]; then printf '%s\n' "$user_conf"; return; fi
+  if [[ "${MORPHIX_SCOPE:-}" == system ]]; then printf '%s\n' /etc/morphix/install.conf; return; fi
+  if [[ -f /etc/morphix/install.conf ]]; then printf '%s\n' /etc/morphix/install.conf; else printf '%s\n' "$user_conf"; fi
+}
+
+load_conf() {
+  local file key value
+  file="$(conf_path)"
+  [[ -f "$file" ]] || die "Morphix is not installed here ($file not found). Install: https://github.com/JI-s-BS/morphix/blob/main/docs/INSTALL.md"
+  MODE="" APP_ROOT="" DATA_DIR="" ENV_FILE="" NODE_DIR="" REPO_URL="$DEFAULT_REPO_URL" CHANNEL=stable PORT=8080 SERVICE_USER=morphix
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    case "$key" in
+      MODE | APP_ROOT | DATA_DIR | ENV_FILE | NODE_DIR | REPO_URL | CHANNEL | PORT | SERVICE_USER) printf -v "$key" '%s' "$value" ;;
+    esac
+  done <"$file"
+  CONF_FILE="$file"
+  [[ "$MODE" == system || "$MODE" == user ]] || die "$file: MODE must be system or user"
+  [[ -n "$APP_ROOT" && -n "$DATA_DIR" ]] || die "$file: APP_ROOT and DATA_DIR must be set"
+  [[ "$PORT" =~ ^[0-9]+$ ]] || die "$file: PORT must be a number"
+}
+
+# Rewrites one key of install.conf (used for CHANNEL).
+conf_set() {
+  local key="$1" value="$2" tmp
+  tmp="$(mktemp "${CONF_FILE}.XXXXXX")"
+  grep -v "^${key}=" "$CONF_FILE" >"$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >>"$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$CONF_FILE"
+}
+
+node_bin() {
+  if [[ -n "${NODE_DIR:-}" && -x "$NODE_DIR/node" ]]; then printf '%s\n' "$NODE_DIR/node"; else command -v node || true; fi
+}
+
+# ------------------------------------------------------------- privileges ---
+is_root() { [[ "$(id -u)" -eq 0 ]]; }
+
+# System installs change root-owned files: re-run this command through sudo.
+need_root_for_system() {
+  [[ "$MODE" == system ]] || return 0
+  is_root && return 0
+  command -v sudo >/dev/null 2>&1 || die "this needs root; run it as root"
+  exec sudo -- "$0" "$@"
+}
+
+systemctl_scope() { if [[ "$MODE" == user ]]; then systemctl --user "$@"; else systemctl "$@"; fi; }
+journal_scope() { if [[ "$MODE" == user ]]; then journalctl --user "$@"; else journalctl "$@"; fi; }
+
+# Runs a build step as the account that owns the app files (the morphix user for system installs).
+as_app_user() {
+  if [[ "$MODE" == system ]] && is_root && id "$SERVICE_USER" >/dev/null 2>&1; then
+    runuser -u "$SERVICE_USER" -- env HOME="$APP_ROOT" PATH="$PATH" "$@"
+  else
+    "$@"
+  fi
+}
+
+# ---------------------------------------------------------------- parsing ---
+# Each parser sets globals and returns 2 with a message on bad input (tests call these).
+parse_update_args() {
+  UPD_CHANNEL="" UPD_SKIP_TESTS=0 UPD_FORCE=0 UPD_WAIT_MIN=60 UPD_AUTO=0
+  while (($#)); do
+    case "$1" in
+      --channel)
+        [[ $# -ge 2 ]] || { warn "--channel needs stable or main"; return 2; }
+        UPD_CHANNEL="$2"; shift ;;
+      --channel=*) UPD_CHANNEL="${1#--channel=}" ;;
+      --skip-tests) UPD_SKIP_TESTS=1 ;;
+      --force) UPD_FORCE=1 ;;
+      --auto) UPD_AUTO=1 ;;
+      --wait)
+        [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || { warn "--wait needs minutes (a number)"; return 2; }
+        UPD_WAIT_MIN="$2"; shift ;;
+      *) warn "unknown option for update: $1"; return 2 ;;
+    esac
+    shift
+  done
+  if [[ -n "$UPD_CHANNEL" && "$UPD_CHANNEL" != stable && "$UPD_CHANNEL" != main ]]; then
+    warn "--channel must be stable or main (got: $UPD_CHANNEL)"; return 2
+  fi
+  return 0
+}
+
+parse_logs_args() {
+  LOGS_FOLLOW=0 LOGS_LINES=100
+  while (($#)); do
+    case "$1" in
+      -f | --follow) LOGS_FOLLOW=1 ;;
+      -n | --lines)
+        [[ $# -ge 2 && "$2" =~ ^[0-9]+$ ]] || { warn "-n needs a number"; return 2; }
+        LOGS_LINES="$2"; shift ;;
+      *) warn "unknown option for logs: $1"; return 2 ;;
+    esac
+    shift
+  done
+}
+
+parse_backup_args() {
+  BK_OUT="" BK_SECRETS=0
+  while (($#)); do
+    case "$1" in
+      -o | --output)
+        [[ $# -ge 2 ]] || { warn "-o needs a file name"; return 2; }
+        BK_OUT="$2"; shift ;;
+      --include-secrets) BK_SECRETS=1 ;;
+      *) warn "unknown option for backup: $1"; return 2 ;;
+    esac
+    shift
+  done
+}
+
+parse_restore_args() {
+  RS_FILE="" RS_YES=0
+  while (($#)); do
+    case "$1" in
+      -y | --yes) RS_YES=1 ;;
+      -*) warn "unknown option for restore: $1"; return 2 ;;
+      *) [[ -z "$RS_FILE" ]] || { warn "restore takes one file"; return 2; }; RS_FILE="$1" ;;
+    esac
+    shift
+  done
+  [[ -n "$RS_FILE" ]] || { warn "usage: morphix restore FILE [--yes]"; return 2; }
+}
+
+# --------------------------------------------------------------- decisions ---
+# Pure functions: they print a decision and touch nothing.
+
+# Is Morphix in the middle of something that a restart would break? The server keeps
+# <data>/run/busy (its own work: designs, slicing, uploads) and <data>/run/printing (a print
+# that depends on this process, e.g. USB streaming) fresh while busy. Stale = it isn't running.
+# Prints the reason and returns 0 when busy.
+busy_reason() {
+  local data_dir="$1" now="${2:-$(date +%s)}" f mtime
+  for f in "$data_dir/run/printing" "$data_dir/run/busy"; do
+    [[ -f "$f" ]] || continue
+    mtime="$(stat -c %Y "$f" 2>/dev/null || echo 0)"
+    if ((now - mtime < BUSY_STALE_SECONDS)); then
+      printf '%s: %s\n' "$(basename "$f")" "$(head -c 200 "$f" 2>/dev/null | tr '\n' ' ')"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# After switching to a new release: keep it, roll back, or give up.
+#   decide_after_health <health_ok 0|1> <previous release or "">  →  keep | rollback | broken
+decide_after_health() {
+  local healthy="$1" previous="$2"
+  if [[ "$healthy" == 1 ]]; then echo keep
+  elif [[ -n "$previous" ]]; then echo rollback
+  else echo broken
+  fi
+}
+
+# Which release `morphix rollback` goes to: the one named, else the recorded previous one,
+# else the newest other release. Args: current previous requested releases...
+rollback_target() {
+  local current="$1" previous="$2" requested="$3" r
+  shift 3
+  if [[ -n "$requested" ]]; then
+    for r in "$@"; do [[ "$r" == "$requested" || "$r" == "$requested"* ]] && { echo "$r"; return 0; }; done
+    return 1
+  fi
+  if [[ -n "$previous" && "$previous" != "$current" ]]; then
+    for r in "$@"; do [[ "$r" == "$previous" ]] && { echo "$r"; return 0; }; done
+  fi
+  # releases are given newest first
+  for r in "$@"; do [[ "$r" != "$current" ]] && { echo "$r"; return 0; }; done
+  return 1
+}
+
+# Releases to delete: keep the newest $keep (current counts as one of them), plus current and
+# previous wherever they are. Args: keep current previous releases(newest first)...
+prune_list() {
+  local keep="$1" current="$2" previous="$3" n=0 r
+  shift 3
+  for r in "$@"; do
+    [[ -n "$previous" && "$r" == "$previous" ]] && continue
+    n=$((n + 1))
+    if ((n > keep)) && [[ "$r" != "$current" ]]; then echo "$r"; fi
+  done
+  return 0
+}
+
+# Node major version check: node_major_ok "v22.11.0" 22
+node_major_ok() {
+  local v="${1#v}" min="${2:-22}"
+  [[ "${v%%.*}" =~ ^[0-9]+$ ]] && ((${v%%.*} >= min))
+}
+
+# ---------------------------------------------------------------- releases ---
+releases_dir() { printf '%s\n' "$APP_ROOT/releases"; }
+release_name() { [[ -L "$APP_ROOT/$1" ]] && basename "$(readlink "$APP_ROOT/$1")" || true; }
+current_release() { release_name current; }
+previous_release() { release_name previous; }
+
+# Release directories, newest first (by build time). Releases that failed their health check
+# carry a .failed-health marker and are left out (rollback never picks them).
+list_releases() {
+  local d
+  [[ -d "$(releases_dir)" ]] || return 0
+  # shellcheck disable=SC2012 # names are hex SHAs, ls -t is fine here
+  for d in $(ls -1t "$(releases_dir)" 2>/dev/null); do
+    [[ -d "$(releases_dir)/$d" && "$d" != *.new && ! -f "$(releases_dir)/$d/.failed-health" ]] && echo "$d"
+  done
+  return 0
+}
+
+# git on the source cache, as the account that owns it (root would hit git's "dubious ownership").
+git_src() { as_app_user git -C "$APP_ROOT/src" "$@"; }
+
+# Atomically points a symlink (current/previous) at a release.
+point_link() {
+  local link="$1" release="$2"
+  ln -sfn "releases/$release" "$APP_ROOT/.$link.tmp"
+  mv -T "$APP_ROOT/.$link.tmp" "$APP_ROOT/$link"
+}
+
+release_info() {
+  local r="$1" f="$APP_ROOT/releases/$1/.morphix-release"
+  if [[ -f "$f" ]]; then tr '\n' ' ' <"$f"; else printf 'release=%s' "$r"; fi
+}
+
+health_url() { printf 'http://127.0.0.1:%s/api/health\n' "$PORT"; }
+
+# One health request: 200 and "ok":true.
+health_once() {
+  local body
+  body="$(curl -fsS --max-time 5 "$(health_url)" 2>/dev/null)" || return 1
+  [[ "$body" == *'"ok":true'* || "$body" == *'"ok": true'* ]]
+}
+
+# Waits up to MORPHIX_HEALTH_TIMEOUT seconds (default 90) for the server to be healthy.
+wait_healthy() {
+  local deadline=$(($(date +%s) + ${MORPHIX_HEALTH_TIMEOUT:-90}))
+  while (($(date +%s) < deadline)); do
+    if health_once; then return 0; fi
+    sleep "${MORPHIX_HEALTH_INTERVAL:-3}"
+  done
+  return 1
+}
+
+# 9>&-: the service must not inherit the update lock (a forked server would hold it forever)
+restart_service() { systemctl_scope restart morphix.service 9>&-; }
+
+# Switches current → $1, restarts, health-checks and rolls back on failure.
+# Returns 0 when the new release is running and healthy.
+activate_release() {
+  local new="$1" old decision
+  old="$(current_release)"
+  if [[ -n "$old" && "$old" != "$new" ]]; then point_link previous "$old"; fi
+  point_link current "$new"
+  say "Switched to release $new; restarting Morphix"
+  restart_service || warn "systemctl restart failed"
+  local healthy=0
+  if wait_healthy; then healthy=1; fi
+  decision="$(decide_after_health "$healthy" "$([[ "$old" != "$new" ]] && echo "$old")")"
+  case "$decision" in
+    keep)
+      say "Health check passed: $(health_url)"
+      return 0 ;;
+    rollback)
+      warn "release $new did not pass the health check; rolling back to $old"
+      point_link current "$old"
+      # remember the bad one: rollback and the nightly update skip it (update --force retries)
+      date -u +%Y-%m-%dT%H:%M:%SZ >"$APP_ROOT/releases/$new/.failed-health" || true
+      rm -f "$APP_ROOT/previous"
+      restart_service || true
+      if wait_healthy; then say "Rolled back to $old; Morphix is healthy again"; else warn "the old release $old is not healthy either; run: morphix doctor"; fi
+      return 1 ;;
+    *)
+      warn "release $new is not healthy and there is no earlier release to go back to; run: morphix doctor"
+      return 1 ;;
+  esac
+}
+
+# Builds a release dir from the git cache at $APP_ROOT/src: archive → npm ci → tests → build.
+build_release() {
+  local sha="$1" skip_tests="$2" channel="$3" dir tmp npm_bin node
+  dir="$(releases_dir)/$sha"
+  tmp="$dir.new"
+  node="$(node_bin)"
+  [[ -n "$node" ]] || die "Node.js not found; re-run the installer"
+  npm_bin="$(dirname "$node")/npm"
+  [[ -x "$npm_bin" ]] || npm_bin="$(command -v npm || true)"
+  [[ -n "$npm_bin" ]] || die "npm not found next to $node"
+  rm -rf "$tmp"
+  as_app_user mkdir -p "$tmp"
+  git_src archive --format=tar "$sha" | as_app_user tar -x -C "$tmp"
+  say "Installing dependencies for $sha (a few minutes on a Raspberry Pi)"
+  local -a envs=(PATH="$(dirname "$node"):$PATH" ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm_config_cache="$APP_ROOT/.npm-cache" npm_config_update_notifier=false)
+  if ! (cd "$tmp" && as_app_user env "${envs[@]}" "$npm_bin" ci --no-audit --no-fund); then
+    rm -rf "$tmp"; die "npm ci failed for $sha; the running release is unchanged"
+  fi
+  if [[ "$skip_tests" != 1 ]]; then
+    say "Running the test suite (skip with --skip-tests)"
+    if ! (cd "$tmp" && as_app_user env "${envs[@]}" "$npm_bin" test --silent); then
+      rm -rf "$tmp"; die "tests failed for $sha; the running release is unchanged"
+    fi
+  fi
+  say "Building"
+  if ! (cd "$tmp" && as_app_user env "${envs[@]}" "$npm_bin" run build --silent && as_app_user env "${envs[@]}" "$npm_bin" run build:server --silent); then
+    rm -rf "$tmp"; die "build failed for $sha; the running release is unchanged"
+  fi
+  [[ -f "$tmp/apps/server/dist/server.cjs" ]] || { rm -rf "$tmp"; die "build of $sha has no apps/server/dist/server.cjs"; }
+  printf 'release=%s\nchannel=%s\nbuilt=%s\n' "$sha" "$channel" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" | as_app_user tee "$tmp/.morphix-release" >/dev/null
+  rm -rf "$dir"
+  mv "$tmp" "$dir"
+}
+
+# Commit to deploy for a channel: main = tip of origin/main; stable = newest v* tag
+# (falls back to main while the project has no tagged release).
+resolve_target() {
+  local channel="$1" tag
+  if [[ "$channel" == stable ]]; then
+    tag="$(git_src tag -l 'v*' --sort=-v:refname | head -n 1)"
+    if [[ -n "$tag" ]]; then git_src rev-parse "$tag^{commit}"; return; fi
+    warn "no stable (v*) release tag yet; using the main branch"
+  fi
+  git_src rev-parse origin/main
+}
+
+fetch_source() {
+  if [[ ! -d "$APP_ROOT/src/.git" ]]; then
+    as_app_user git clone --quiet --no-checkout "$REPO_URL" "$APP_ROOT/src"
+  fi
+  git_src fetch --quiet --tags --prune origin
+}
+
+# Copies the CLI and its unit templates from a release (atomic: a running copy is not overwritten in place).
+install_cli_from() {
+  local rel_dir="$1" bin="$2" tmp
+  [[ -f "$rel_dir/scripts/install/morphix" ]] || return 0
+  tmp="$(mktemp "$bin.XXXXXX")"
+  cp "$rel_dir/scripts/install/morphix" "$tmp"
+  chmod 0755 "$tmp"
+  mv -f "$tmp" "$bin"
+}
+
+cli_path() { if [[ "$MODE" == system ]]; then echo /usr/local/bin/morphix; else echo "$HOME/.local/bin/morphix"; fi; }
+
+prune_releases() {
+  local r
+  # shellcheck disable=SC2046 # release names have no spaces
+  for r in $(prune_list "$KEEP_RELEASES" "$(current_release)" "$(previous_release)" $(list_releases)); do
+    rm -rf "${APP_ROOT:?}/releases/$r"
+  done
+}
+
+wait_not_busy() {
+  local minutes="$1" auto="$2" reason deadline
+  deadline=$(($(date +%s) + minutes * 60))
+  while reason="$(busy_reason "$DATA_DIR")"; do
+    if (($(date +%s) >= deadline)); then
+      if [[ "$auto" == 1 ]]; then say "Morphix is still busy ($reason); skipping this automatic update"; return 1; fi
+      die "Morphix is still busy ($reason) after $minutes min; try again later (nothing was changed)"
+    fi
+    say "Morphix is busy ($reason); waiting before restarting"
+    sleep "${MORPHIX_BUSY_POLL:-10}"
+  done
+  return 0
+}
+
+# ---------------------------------------------------------------- commands ---
+cmd_update() {
+  parse_update_args "$@" || exit 2
+  need_root_for_system update "$@"
+  local channel="${UPD_CHANNEL:-$CHANNEL}" target current lock
+  lock="$APP_ROOT/.update.lock"
+  exec 9>"$lock"
+  flock -n 9 || die "another update is running"
+  # A nightly update doesn't even start building (CPU load) while a print or job is running.
+  if [[ "$UPD_AUTO" == 1 ]]; then wait_not_busy "$UPD_WAIT_MIN" 1 || return 0; fi
+  say "Fetching $REPO_URL ($channel)"
+  fetch_source || die "could not fetch $REPO_URL; check the network (nothing was changed)"
+  target="$(resolve_target "$channel")" || die "could not find the $channel version"
+  current="$(current_release)"
+  if [[ "$target" == "$current" && "$UPD_FORCE" != 1 ]]; then
+    say "Already up to date ($channel, ${target:0:12})"
+    [[ -n "$UPD_CHANNEL" ]] && conf_set CHANNEL "$channel"
+    return 0
+  fi
+  if [[ -f "$(releases_dir)/$target/.failed-health" && "$UPD_FORCE" != 1 ]]; then
+    say "${target:0:12} failed its health check before; not trying it again (morphix update --force retries)"
+    return 0
+  fi
+  if [[ ! -d "$(releases_dir)/$target" || "$UPD_FORCE" == 1 ]]; then
+    build_release "$target" "$UPD_SKIP_TESTS" "$channel"
+  fi
+  wait_not_busy "$UPD_WAIT_MIN" "$UPD_AUTO" || return 0
+  if activate_release "$target"; then
+    install_cli_from "$APP_ROOT/current" "$(cli_path)"
+    [[ -n "$UPD_CHANNEL" ]] && conf_set CHANNEL "$channel"
+    prune_releases
+    say "Morphix updated to ${target:0:12} ($channel)"
+  else
+    exit 1
+  fi
+}
+
+cmd_rollback() {
+  need_root_for_system rollback "$@"
+  local target
+  # shellcheck disable=SC2046
+  target="$(rollback_target "$(current_release)" "$(previous_release)" "${1:-}" $(list_releases))" ||
+    die "no release to roll back to${1:+ matching $1}; installed: $(list_releases | tr '\n' ' ')"
+  wait_not_busy 60 0
+  activate_release "$target" || exit 1
+  say "Rolled back to ${target:0:12}"
+}
+
+cmd_status() {
+  local active cur reason
+  active="$(systemctl_scope is-active morphix.service 2>/dev/null || true)"
+  cur="$(current_release)"
+  say "Morphix ($MODE install)"
+  say "  service:  ${active:-unknown}"
+  say "  release:  ${cur:-none} $( [[ -n "$cur" ]] && release_info "$cur")"
+  say "  channel:  $CHANNEL"
+  say "  data dir: $DATA_DIR"
+  if health_once; then say "  health:   ok ($(health_url))"; else say "  health:   not answering ($(health_url))"; fi
+  if reason="$(busy_reason "$DATA_DIR")"; then say "  busy:     $reason"; fi
+  say "  auto-update: $(systemctl_scope is-enabled morphix-update.timer 2>/dev/null || echo disabled)"
+  lan_urls | sed 's/^/  open:     /'
+}
+
+lan_urls() {
+  local ip
+  for ip in $( (hostname -I 2>/dev/null || ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*/,"",$4); print $4}') | tr ' ' '\n' | grep -E '^[0-9]+\.' || true); do
+    printf 'http://%s:%s\n' "$ip" "$PORT"
+  done
+  printf 'http://%s.local:%s\n' "$(hostname 2>/dev/null || echo localhost)" "$PORT"
+}
+
+cmd_logs() {
+  parse_logs_args "$@" || exit 2
+  local -a args=(-u morphix.service -n "$LOGS_LINES" --no-pager)
+  [[ "$LOGS_FOLLOW" == 1 ]] && args+=(-f)
+  journal_scope "${args[@]}"
+}
+
+cmd_service() {
+  need_root_for_system "$1"
+  systemctl_scope "$1" morphix.service
+  [[ "$1" == stop ]] || { if wait_healthy; then say "Morphix is running: $(health_url)"; else warn "Morphix did not answer $(health_url); see: morphix logs"; fi; }
+}
+
+cmd_version() {
+  local cur node
+  cur="$(current_release)"
+  node="$(node_bin)"
+  say "morphix CLI $MORPHIX_CLI_VERSION"
+  say "release ${cur:-none} $( [[ -n "$cur" ]] && release_info "$cur")"
+  say "node $([[ -n "$node" ]] && "$node" -v 2>/dev/null || echo 'not found')"
+}
+
+cmd_doctor() {
+  DOCTOR_FAILS=0
+  local node v active free_mb perm owner dev
+  say "Morphix doctor ($MODE install, $CONF_FILE)"
+  node="$(node_bin)"
+  if [[ -z "$node" ]]; then bad "Node.js not found" "re-run the installer (it installs Node 22 LTS)"
+  else
+    v="$("$node" -v 2>/dev/null || echo v0)"
+    if node_major_ok "$v" 22; then ok "Node.js $v ($node)"; else bad "Node.js $v is older than 22" "re-run the installer to get Node 22 LTS"; fi
+  fi
+  if [[ -n "$(current_release)" && -f "$APP_ROOT/current/apps/server/dist/server.cjs" ]]; then ok "release $(current_release)"
+  else bad "no built release at $APP_ROOT/current" "morphix update --force"; fi
+  active="$(systemctl_scope is-active morphix.service 2>/dev/null || true)"
+  if [[ "$active" == active ]]; then ok "service is running"
+  else bad "service is ${active:-unknown}" "morphix start; then morphix logs -n 50 to see why it stopped"; fi
+  if health_once; then ok "health endpoint answers: $(health_url)"
+  else bad "health endpoint does not answer: $(health_url)" "morphix logs -n 50; morphix restart"; fi
+  if command -v ss >/dev/null 2>&1; then
+    if [[ -z "$(ss -Hltn "sport = :$PORT" 2>/dev/null)" ]]; then
+      if [[ "$active" == active ]]; then note "nothing listens on port $PORT yet" "wait a few seconds, then: morphix logs"; else ok "port $PORT is free"; fi
+    elif health_once; then ok "port $PORT is Morphix"
+    else bad "port $PORT is taken by a program that isn't answering as Morphix" "find it with: sudo ss -ltnp 'sport = :$PORT'; stop it, or set MORPHIX_PORT in $ENV_FILE and PORT in $CONF_FILE, then morphix restart"; fi
+  fi
+  if [[ -d "$DATA_DIR" ]]; then
+    perm="$(stat -c %a "$DATA_DIR")"; owner="$(stat -c %U "$DATA_DIR")"
+    local want_owner; want_owner="$([[ "$MODE" == system ]] && echo "$SERVICE_USER" || id -un)"
+    if [[ "$perm" == 700 && "$owner" == "$want_owner" ]]; then ok "data dir $DATA_DIR (700, $owner)"
+    else bad "data dir $DATA_DIR is $perm owned by $owner" "sudo chown -R $want_owner: $DATA_DIR && sudo chmod 700 $DATA_DIR"; fi
+  else bad "data dir $DATA_DIR is missing" "re-run the installer"; fi
+  free_mb="$(df -Pm "$APP_ROOT" 2>/dev/null | awk 'NR==2 {print $4}')"
+  if [[ "${free_mb:-0}" -ge 1024 ]]; then ok "disk: ${free_mb} MB free"
+  else bad "disk: only ${free_mb:-?} MB free under $APP_ROOT" "free space (old releases: morphix update prunes them; journalctl --vacuum-size=100M)"; fi
+  local found="" s
+  for s in prusa-slicer PrusaSlicer orca-slicer OrcaSlicer bambu-studio BambuStudio; do
+    command -v "$s" >/dev/null 2>&1 && found+="$s "
+  done
+  if [[ -n "$found" ]]; then ok "slicers on PATH: $found"
+  else note "no slicer found on PATH" "install PrusaSlicer (re-run the installer with --with-prusaslicer) or set a slicer path on the setup page"; fi
+  local u g; u="$([[ "$MODE" == system ]] && echo "$SERVICE_USER" || id -un)"
+  for dev in /dev/ttyUSB* /dev/ttyACM*; do
+    [[ -e "$dev" ]] || continue
+    g="$(stat -c %G "$dev")"
+    if id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx "$g"; then ok "USB printer port $dev (group $g) is usable by $u"
+    else bad "$u can't open $dev (group $g)" "sudo usermod -aG $g $u, then morphix restart (user installs: log out and back in)"; fi
+  done
+  local reason
+  if reason="$(busy_reason "$DATA_DIR")"; then note "Morphix is busy: $reason" "updates wait until it's done"; fi
+  if ((DOCTOR_FAILS == 0)); then say "All checks passed."; else say "$DOCTOR_FAILS check(s) failed."; return 1; fi
+}
+
+# Secret files are left out of backups unless --include-secrets.
+SECRET_PATTERNS=(secrets.json secrets 'secrets.*' '*.env' '*.key' '*.pem' 'auth.json' 'session-secret*')
+
+cmd_backup() {
+  parse_backup_args "$@" || exit 2
+  need_root_for_system backup "$@"
+  local out="${BK_OUT:-$PWD/morphix-backup-$(date +%Y%m%d-%H%M%S).tar.gz}" p
+  local -a excludes=(--exclude=./run)
+  if [[ "$BK_SECRETS" != 1 ]]; then
+    for p in "${SECRET_PATTERNS[@]}"; do excludes+=("--exclude=$p"); done
+  fi
+  (umask 077 && tar -czf "$out" "${excludes[@]}" -C "$DATA_DIR" .)
+  # run through sudo: hand the file to the person who asked for it
+  if is_root && [[ -n "${SUDO_USER:-}" ]]; then chown "$SUDO_USER:" "$out"; fi
+  if [[ "$BK_SECRETS" == 1 ]]; then
+    warn "this backup CONTAINS SECRETS (API keys, password hashes); keep $out private"
+  else
+    say "Secrets (API keys, admin password) are not in the backup; add --include-secrets to include them"
+  fi
+  say "Backup written: $out ($(du -h "$out" | cut -f1))"
+}
+
+# Rejects tarballs with absolute paths or .. members.
+tar_is_safe() {
+  local member
+  while IFS= read -r member; do
+    case "$member" in
+      /* | ../* | */../* | .. | */..) return 1 ;;
+    esac
+  done < <(tar -tzf "$1")
+  return 0
+}
+
+cmd_restore() {
+  parse_restore_args "$@" || exit 2
+  need_root_for_system restore "$@"
+  [[ -f "$RS_FILE" ]] || die "$RS_FILE not found"
+  tar_is_safe "$RS_FILE" || die "$RS_FILE has unsafe paths; not restoring it"
+  if [[ "$RS_YES" != 1 ]]; then
+    local answer=""
+    { true </dev/tty; } 2>/dev/null || die "no terminal to confirm; add --yes"
+    printf 'Replace the data in %s with %s? The current data is kept as a .before-restore copy. [y/N] ' "$DATA_DIR" "$RS_FILE"
+    read -r answer </dev/tty || true
+    [[ "$answer" == [yY]* ]] || die "cancelled"
+  fi
+  local keep; keep="$DATA_DIR.before-restore-$(date +%Y%m%d-%H%M%S)"
+  systemctl_scope stop morphix.service || true
+  mv "$DATA_DIR" "$keep"
+  install -d -m 0700 "$DATA_DIR"
+  tar -xzf "$RS_FILE" -C "$DATA_DIR" --no-same-owner
+  [[ "$MODE" == system ]] && chown -R "$SERVICE_USER:$SERVICE_USER" "$DATA_DIR"
+  chmod 0700 "$DATA_DIR"
+  systemctl_scope start morphix.service
+  say "Restored $RS_FILE; the previous data is in $keep"
+  if wait_healthy; then say "Morphix is running: $(health_url)"
+  else warn "Morphix did not answer $(health_url) after the restore; see: morphix logs (the old data is in $keep)"; return 1; fi
+}
+
+cmd_reset_admin() {
+  need_root_for_system reset-admin "$@"
+  local node; node="$(node_bin)"
+  [[ -f "$APP_ROOT/current/apps/server/dist/server.cjs" ]] || die "no built release; run: morphix update --force"
+  local -a cmd=(env MORPHIX_DATA_DIR="$DATA_DIR" MORPHIX_ROOT="$DATA_DIR" "$node" "$APP_ROOT/current/apps/server/dist/server.cjs" reset-admin "$@")
+  if [[ "$MODE" == system ]]; then runuser -u "$SERVICE_USER" -- "${cmd[@]}"; else "${cmd[@]}"; fi
+}
+
+cmd_auto_update() {
+  case "${1:-status}" in
+    on) need_root_for_system auto-update on; systemctl_scope enable --now morphix-update.timer; say "Automatic updates on: nightly, never during a print" ;;
+    off) need_root_for_system auto-update off; systemctl_scope disable --now morphix-update.timer; say "Automatic updates off" ;;
+    status) say "auto-update: $(systemctl_scope is-enabled morphix-update.timer 2>/dev/null || echo disabled)" ;;
+    *) die "usage: morphix auto-update on|off|status" ;;
+  esac
+}
+
+usage() {
+  cat <<'EOF'
+Usage: morphix <command>
+
+  status                      service, release, health and LAN address
+  start | stop | restart      control the Morphix service
+  logs [-f] [-n N]            show (or follow) the server log
+  update [options]            fetch, build, test, switch, health-check (rolls back on failure)
+      --channel stable|main   stable = newest release tag (default), main = latest code
+      --skip-tests            don't run the test suite before switching
+      --force                 rebuild even if already on that version
+      --wait MIN              how long to wait while a print/job is busy (default 60)
+  rollback [RELEASE]          go back to the previous (or named) release
+  doctor                      check everything and say how to fix what's wrong
+  backup [-o FILE] [--include-secrets]
+  restore FILE [--yes]        replace the data dir with a backup
+  reset-admin                 set a new admin password
+  auto-update on|off|status   nightly updates (off by default; never during a print)
+  version
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"
+  [[ $# -gt 0 ]] && shift
+  case "$cmd" in
+    help | -h | --help) usage; return 0 ;;
+  esac
+  load_conf
+  case "$cmd" in
+    status) cmd_status ;;
+    start | stop | restart) cmd_service "$cmd" ;;
+    logs) cmd_logs "$@" ;;
+    update) cmd_update "$@" ;;
+    rollback) cmd_rollback "$@" ;;
+    doctor) cmd_doctor ;;
+    backup) cmd_backup "$@" ;;
+    restore) cmd_restore "$@" ;;
+    reset-admin) cmd_reset_admin "$@" ;;
+    auto-update) cmd_auto_update "$@" ;;
+    version | --version) cmd_version ;;
+    *) usage >&2; exit 2 ;;
+  esac
+}
+
+if [[ "${MORPHIX_CLI_SOURCE_ONLY:-0}" != 1 ]]; then main "$@"; fi

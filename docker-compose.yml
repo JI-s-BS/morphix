@@ -1,0 +1,43 @@
+# Morphix in Docker:  docker compose up -d   then open http://<this machine>:8080
+# Update:  git pull && docker compose up -d --build     Logs: docker compose logs -f
+# Reset the admin password:  docker compose exec morphix node apps/server/dist/server.cjs reset-admin
+services:
+  morphix:
+    build:
+      context: .
+      args:
+        WITH_PRUSASLICER: "0"   # "1" adds PrusaSlicer to the image
+    image: morphix:local
+    container_name: morphix
+    restart: unless-stopped
+    init: true
+    ports:
+      - "8080:8080"
+    environment:
+      MORPHIX_PORT: "8080"
+      MORPHIX_BIND: "0.0.0.0"
+    volumes:
+      # settings, API keys (mode 0600), models and jobs; survives rebuilds
+      - morphix-data:/data
+    # USB printers (Marlin/Klipper over serial): pass the device in, and make sure the
+    # container's user may open it. Find yours with: ls -l /dev/serial/by-id/
+    # The image's morphix user is in the container's dialout group (gid 20, as on Debian
+    # and Raspberry Pi OS hosts). If the device belongs to another group on your host
+    # (Arch: uucp; check `stat -c %g /dev/ttyUSB0`), add that numeric gid under group_add.
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    # group_add:
+    #   - "20"
+    #
+    # Printer discovery (mDNS/SSDP/UDP broadcast) doesn't cross Docker's bridge network.
+    # Typing the printer's IP always works; for auto-discovery use the host network instead
+    # (then remove the `ports:` section; Morphix listens on the host's port 8080 directly):
+    # network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  morphix-data:

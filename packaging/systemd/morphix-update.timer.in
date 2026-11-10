@@ -1,0 +1,11 @@
+# Enabled only by `morphix auto-update on` (or install.sh --auto-update).
+[Unit]
+Description=Nightly Morphix update (opt-in)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=45min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

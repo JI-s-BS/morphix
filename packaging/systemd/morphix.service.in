@@ -1,0 +1,49 @@
+# Morphix headless server (system install). Rendered by scripts/install/install.sh;
+# placeholders: @APP_ROOT@ @DATA_DIR@ @ENV_FILE@ @NODE@ @USER@
+[Unit]
+Description=Morphix 3D printing server
+Documentation=https://github.com/JI-s-BS/morphix/blob/main/docs/INSTALL.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+# USB printers/cameras: install.sh adds @USER@ to dialout/uucp and video (whichever exist).
+EnvironmentFile=-@ENV_FILE@
+Environment=NODE_ENV=production
+Environment=MORPHIX_DATA_DIR=@DATA_DIR@
+Environment=MORPHIX_ROOT=@DATA_DIR@
+Environment=HOME=@DATA_DIR@
+WorkingDirectory=@APP_ROOT@/current
+ExecStart=@NODE@ @APP_ROOT@/current/apps/server/dist/server.cjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+# Hardening: the app can only write its data dir. Not set on purpose:
+# PrivateDevices (would hide /dev/ttyUSB*), MemoryDenyWriteExecute (breaks the V8 JIT).
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=@DATA_DIR@
+UMask=0077
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
