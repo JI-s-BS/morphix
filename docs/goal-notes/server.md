@@ -93,3 +93,10 @@ The Vultr diagnoser tests stay, since `packages/healer` is cleanup's.
   - `MORPHIX_SERVER_URL=http://localhost:8080 npm start` just shows that server.
   - Unset, it runs the same core in-process over IPC plus a 127.0.0.1 server for the UI, library and camera. Its data dir is `MORPHIX_DATA_DIR` or `MORPHIX_ROOT` or `~/Morphix` (the existing Pi).
 - `vite dev` now proxies `/api` and `/library` to `MORPHIX_DEV_SERVER` (default :8080). The mock is used only with `VITE_MORPHIX_MOCK=1`.
+
+## README (asked for by the owner directly, ahead of the integration step)
+README.md was rewritten for the open platform. It has the Devpost link, the YouTube demo (HJM8_yL3bGg), the SharkByte awards, the team,
+screenshots and photos in `docs/images/` (from the team's Devpost gallery, resized, EXIF stripped), and a GIF plus stills from the touchscreen
+replay. The replay video itself is `docs/media/morphix-touchscreen-replay.mp4`, 3 MB.
+It links `docs/INSTALL.md` and `docs/printers/README.md`, which arrive with the install and catalog branches. At integration, check that the
+printer table and the install commands still match those branches.
