@@ -15,10 +15,6 @@ for (const e of CORE_ERROR_CODES) {
   owners.set(e.code, "core");
 }
 
-export function isErrorCode(code: unknown): code is ErrorCode {
-  return typeof code === "string" && ERROR_CODE_PATTERN.test(code);
-}
-
 export function getErrorEntry(code: string): ErrorCodeEntry | undefined {
   return registry.get(code);
 }

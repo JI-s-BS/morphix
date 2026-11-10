@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import {
   buildDiagnosisPrompt, classifyLog, claudeDiagnoserFromEnv, cleanOldFiles, createClaudeDiagnoser, defaultCleanTargets,
-  DEFAULT_CLAUDE_MODEL, fingerprint, isUnsafeCleanRoot, parseDiagnosis, redactSecrets, REMEDIATION_IDS, REMEDIATIONS, secretEnvValues, type DiagnoseInput,
+  DEFAULT_CLAUDE_MODEL, firstDiagnoser, fingerprint, isUnsafeCleanRoot, parseDiagnosis, redactSecrets, REMEDIATION_IDS, REMEDIATIONS, secretEnvValues, type DiagnoseInput,
 } from "@morphix/healer";
 
 describe("classifyLog", () => {
@@ -175,5 +175,15 @@ describe("disk cleanup", () => {
     expect(isUnsafeCleanRoot("/usr")).toBe(true);
     expect(isUnsafeCleanRoot(tmpdir())).toBe(false); // the default target for morphix-* temp dirs
     expect(isUnsafeCleanRoot(join(tmpdir(), "x"))).toBe(false);
+  });
+});
+
+describe("firstDiagnoser", () => {
+  it("falls through to the next diagnoser when one fails", async () => {
+    const input: any = { incident: { kind: "unknown-error", what: "printer said E12", code: null, context: {} }, logLines: [], remediations: [] };
+    const failing = async () => { throw new Error("Claude HTTP 529"); };
+    const backup = async () => ({ summary: "from backup", likelyCause: "", userHint: "", suggestedRemediation: "none" as const, confidence: "low" as const });
+    expect(await firstDiagnoser([failing, backup])!(input)).toMatchObject({ summary: "from backup" });
+    expect(firstDiagnoser([null, undefined])).toBeNull();
   });
 });

@@ -75,10 +75,3 @@ export function applyGuardianSchema(db: SqlExec): void {
     if (!cols(table).has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
   }
 }
-
-/** Short severity string for the Phase 1 failure_alerts.level column. */
-export function levelForState(state: string): "warning" | "critical" | "info" {
-  if (state === "possible_failure") return "warning";
-  if (state === "resolved" || state === "false_alarm") return "info";
-  return "critical";
-}

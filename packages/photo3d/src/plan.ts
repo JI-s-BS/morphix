@@ -14,7 +14,6 @@ import { checkPhotos, MESHY_IMAGE_MIMES, stripJpegMetadata, type CheckedPhoto, t
 import type { PhotoToModelRequest } from "./pipeline";
 
 export type PhotoRoute = "meshy" | "cad";
-export const PHOTO_ROUTES: readonly PhotoRoute[] = ["meshy", "cad"];
 
 /** The phone sends at most this many photos (Meshy multi-image uses up to 4). */
 export const PHONE_MAX_PHOTOS = 4;

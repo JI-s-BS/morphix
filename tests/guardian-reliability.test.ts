@@ -2,7 +2,8 @@
 // Python): heating start-up, a real stall, the print ending, pauses, the printer
 // going offline after an unseen stop, and the spoken warning on top.
 import { describe, expect, it, vi } from "vitest";
-import { MemoryGuardianStore, PrintGuardian, StallMonitor, isHeating } from "@morphix/guardian";
+import { PrintGuardian, StallMonitor, isHeating } from "@morphix/guardian";
+import { MemoryGuardianStore } from "./guardian-helpers";
 import type { GuardianPrinterStatus, VisionEvent, VisionWorkerHandlers, WorkerStatus } from "@morphix/guardian";
 import { GuardianVoice, type GuardianVoiceDeps } from "../apps/desktop/electron/guardian-voice";
 

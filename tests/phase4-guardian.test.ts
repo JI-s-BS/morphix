@@ -3,7 +3,8 @@ import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { GeminiVisionClient, MemoryGuardianStore, PrintGuardian } from "@morphix/guardian";
+import { GeminiVisionClient, PrintGuardian } from "@morphix/guardian";
+import { MemoryGuardianStore } from "./guardian-helpers";
 import type { PrinterStatus } from "@morphix/shared";
 import type { FetchLike, GuardianSnapshot, VisionEvent, VisionWorkerConfig, VisionWorkerHandlers, WorkerStatus } from "@morphix/guardian";
 
@@ -50,7 +51,7 @@ describe("PrintGuardian orchestration", () => {
     g.updatePrinterStatus({ online: true, machine: "BUILDING_FROM_SD", progress: 12 });
     expect(sent.at(-1)).toEqual({ online: true, machine: "BUILDING_FROM_SD", progress: 12 });
     expect(store.sessions.get("sess-1")).toMatchObject({ printJobId: "job-9", evidenceRelDir: "snapshots/sess-1" });
-    expect(g.snapshot()).toMatchObject({ autoPause: false, gemini: { available: false }, swarms: false, telemetry: { enabled: false } });
+    expect(g.snapshot()).toMatchObject({ autoPause: false, gemini: { available: false } });
   });
 
   it("accepts the observer's PrinterStatus directly", () => {

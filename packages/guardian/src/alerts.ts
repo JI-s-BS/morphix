@@ -26,10 +26,6 @@ export type AlertState =
 
 export type GuardianState = "idle" | "monitoring" | AlertState;
 
-export const OPEN_ALERT_STATES: readonly AlertState[] = [
-  "possible_failure", "confirmed_failure", "pause_requested", "pause_confirmed", "pause_unconfirmed",
-];
-
 /** Operator-facing wording. Deliberately never says "paused" before the printer confirms it. */
 export const STATE_LABELS: Record<GuardianState, string> = {
   idle: "Guardian off",
@@ -61,7 +57,7 @@ export interface Transition {
 }
 
 export interface AlertVerification {
-  source: "gemini" | "swarms" | "local";
+  source: "gemini" | "local";
   problem?: string;
   confidence?: number;
   explanation?: string;
