@@ -109,4 +109,5 @@ I merged claude/op-setup-716238 (26b4dc8) into this branch (3c7573c) in a throwa
 - The SetupGate sign-in page renders under the CSP with no console errors.
 - `server.cjs reset-admin` prints the one-time password to the terminal only (it is not in the logs), and the open session was signed out.
 
-Open point: the core reads config and keys at start-up, so a new printer or new keys need `morphix restart`. Integration could add a reload hook.
+Open point: the core reads config and keys at start-up, so a new printer or new keys need `morphix restart`. The setup page says so after
+every save (`RESTART_NOTE` in `apps/desktop/src/pages/setup/parts.tsx`, setup commit a678180). Remove it there once integration adds a reload hook.
