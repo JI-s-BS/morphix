@@ -100,3 +100,13 @@ screenshots and photos in `docs/images/` (from the team's Devpost gallery, resiz
 replay. The replay video itself is `docs/media/morphix-touchscreen-replay.mp4`, 3 MB.
 It links `docs/INSTALL.md` and `docs/printers/README.md`, which arrive with the install and catalog branches. At integration, check that the
 printer table and the install commands still match those branches.
+
+## Checked with the setup branch (trial merge, not committed)
+I merged claude/op-setup-716238 (26b4dc8) into this branch (3c7573c) in a throwaway worktree. It merges cleanly, typecheck passes and
+739 tests pass. On a live run:
+- `/api/session` reports setup open, and RPC answers 401 `setup_required`.
+- `POST /api/auth/setup` creates the admin and signs in, then RPC answers 200.
+- The SetupGate sign-in page renders under the CSP with no console errors.
+- `server.cjs reset-admin` prints the one-time password to the terminal only (it is not in the logs), and the open session was signed out.
+
+Open point: the core reads config and keys at start-up, so a new printer or new keys need `morphix restart`. Integration could add a reload hook.
