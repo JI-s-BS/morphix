@@ -7,6 +7,9 @@ import {
   type SessionUser, type SlicerChoice, type TestResult,
 } from "./api";
 
+/** The server reads printers, keys and the slicer at start-up (until it learns to reload them). */
+export const RESTART_NOTE = "Saved. Restart Morphix to use the change: run morphix restart on the Morphix machine (or reboot it).";
+
 export function Field({ label, help, children }: { label: string; help?: ReactNode; children: ReactNode }) {
   return (
     <label className="su-field">
@@ -379,6 +382,7 @@ export function PrinterList({ onChange }: { onChange?: (count: number) => void }
   const [list, setList] = useState<{ printers: SavedPrinter[]; activePrinterId: string | null } | null>(null);
   const [editing, setEditing] = useState<SavedPrinter | "new" | null>(null);
   const [results, setResults] = useState<Record<string, TestResult>>({});
+  const [changed, setChanged] = useState(false);
   const a = useAction();
   const refresh = () =>
     a.run(async () => {
@@ -396,7 +400,7 @@ export function PrinterList({ onChange }: { onChange?: (count: number) => void }
     return (
       <PrinterEditor
         saved={editing === "new" ? undefined : editing}
-        onSaved={() => { setEditing(null); void refresh(); }}
+        onSaved={() => { setEditing(null); setChanged(true); void refresh(); }}
         onCancel={list && list.printers.length > 0 ? () => setEditing(null) : undefined}
       />
     );
@@ -413,7 +417,7 @@ export function PrinterList({ onChange }: { onChange?: (count: number) => void }
               <div className="muted small">{p.driverName}{p.connection.host ? ` · ${String(p.connection.host)}` : ""}{p.driverAvailable ? "" : " · driver not available"}</div>
             </div>
             {list.activePrinterId !== p.id && (
-              <button className="btn" onClick={() => void a.run(async () => { await call("PUT", "/api/setup/active-printer", { id: p.id }); await refresh(); })}>Use this one</button>
+              <button className="btn" onClick={() => void a.run(async () => { await call("PUT", "/api/setup/active-printer", { id: p.id }); setChanged(true); await refresh(); })}>Use this one</button>
             )}
             <button className="btn" disabled={a.busy} onClick={() => void a.run(async () => {
               const r = await call<{ result: TestResult }>("POST", `/api/setup/printers/${p.id}/test`);
@@ -421,12 +425,13 @@ export function PrinterList({ onChange }: { onChange?: (count: number) => void }
             })}>Test</button>
             <button className="btn" onClick={() => setEditing(p)}>Edit</button>
             <button className="btn ghost" onClick={() => {
-              if (window.confirm(`Remove ${p.name}? Its saved codes are deleted too.`)) void a.run(async () => { await call("DELETE", `/api/setup/printers/${p.id}`); await refresh(); });
+              if (window.confirm(`Remove ${p.name}? Its saved codes are deleted too.`)) void a.run(async () => { await call("DELETE", `/api/setup/printers/${p.id}`); setChanged(true); await refresh(); });
             }}>Remove</button>
           </div>
           {results[p.id] && <TestOutcome result={results[p.id]} />}
         </div>
       ))}
+      {changed && <Msg kind="ok" text={RESTART_NOTE} />}
       {a.error && <Msg kind="bad" text={a.error} />}
       <div className="su-actions">
         <button className="btn" onClick={() => setEditing("new")}>＋ Add a printer</button>
@@ -494,7 +499,7 @@ export function SlicerPicker({ onSaved }: { onSaved?: (id: string | null) => voi
           </div>
         </details>
       )}
-      {saved && !a.error && <Msg kind="ok" text="Saved." />}
+      {saved && !a.error && <Msg kind="ok" text={RESTART_NOTE} />}
       {a.error && <Msg kind="bad" text={a.error} />}
       <div className="su-actions">
         <button className="btn ghost" onClick={() => void load()} disabled={a.busy}>Check again</button>
@@ -546,14 +551,14 @@ function KeyRow({ info, onChange }: { info: KeyInfo; onChange: () => void }) {
       {a.error && <Msg kind="bad" text={a.error} />}
       <div className="su-actions">
         {info.set && (
-          <button className="btn ghost" disabled={a.busy} onClick={() => void a.run(async () => { await call("DELETE", `/api/setup/keys/${info.key}`); setResult(null); onChange(); })}>Remove</button>
+          <button className="btn ghost" disabled={a.busy} onClick={() => void a.run(async () => { await call("DELETE", `/api/setup/keys/${info.key}`); setResult({ ok: true, message: RESTART_NOTE.replace("Saved.", "Removed.") }); onChange(); })}>Remove</button>
         )}
         <span className="spacer" />
         <button className="btn" disabled={a.busy || (!value && !info.set)} onClick={test}>Test</button>
         <button className="btn primary" disabled={a.busy || !value} onClick={() => void a.run(async () => {
           await call("PUT", `/api/setup/keys/${info.key}`, { value });
           setValue("");
-          setResult({ ok: true, message: "Saved." });
+          setResult({ ok: true, message: RESTART_NOTE });
           onChange();
         })}>Save</button>
       </div>
@@ -571,12 +576,16 @@ const FEATURES: { key: keyof Features; label: string; text: string }[] = [
 
 export function FeaturesPanel({ initial }: { initial?: Features }) {
   const [features, setFeatures] = useState<Features | null>(initial ?? null);
+  const [changed, setChanged] = useState(false);
   const a = useAction();
   useEffect(() => {
     if (!initial) void a.run(async () => setFeatures((await call<{ features: Features }>("GET", "/api/setup/status")).features ?? null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const set = (k: keyof Features, v: boolean) => void a.run(async () => setFeatures((await call<{ features: Features }>("PUT", "/api/setup/features", { [k]: v })).features));
+  const set = (k: keyof Features, v: boolean) => void a.run(async () => {
+    setFeatures((await call<{ features: Features }>("PUT", "/api/setup/features", { [k]: v })).features);
+    setChanged(true);
+  });
   return (
     <div className="su-card">
       <h3>Features</h3>
@@ -589,6 +598,7 @@ export function FeaturesPanel({ initial }: { initial?: Features }) {
           </div>
         </div>
       ))}
+      {changed && !a.error && <Msg kind="ok" text={RESTART_NOTE} />}
       {a.error && <Msg kind="bad" text={a.error} />}
     </div>
   );

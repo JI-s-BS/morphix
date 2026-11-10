@@ -127,6 +127,7 @@ function DoneStep({ onBack, onFinished }: { onBack: () => void; onFinished: () =
           <div className="stat"><span className="muted">AI keys</span><span>{keys ? `${keys} set` : "None (that's fine)"}</span></div>
           {!status.printers && <Msg kind="warn" text="Without a printer you can make and view models but not print them." hint="Add one any time in Settings → System setup." />}
           {status.issues?.map((i) => <Msg key={i} kind="warn" text={i} />)}
+          <Msg kind="ok" text="After you start, restart Morphix once so it uses this printer and these keys: run morphix restart on the Morphix machine (or reboot it)." />
         </>
       )}
       {a.error && <Msg kind="bad" text={a.error} />}

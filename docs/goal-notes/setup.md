@@ -156,6 +156,8 @@ I checked the flow in a browser against these routes, using a throwaway harness 
 
 ## Not done / for later
 
+- **Changes need a restart.** For now the server reads printers, keys and the slicer only at start-up. After every save, the setup page shows "Restart Morphix to use the change: run morphix restart" (`RESTART_NOTE` in `parts.tsx`), and the wizard's last step says it too. Once integration adds a reload, remove the note.
+
 - **Sessions are in memory.** That is simpler and nothing persistent can leak, but an update or restart signs everyone out. Persisting hashed tokens in `secrets/` would be a small change if wanted.
 - **Kiosk over HTTP.** A local kiosk that is a plain browser (`chromium --kiosk`, no `window.morphix`) has to sign in like any other browser. Trusting loopback was deliberately left out, because a Cloudflare tunnel or proxy also arrives on loopback.
 - **Printer setup guides** link to GitHub (`DOCS_BASE` in routes.ts). If the server later serves `docs/` itself, change `DOCS_BASE`.
