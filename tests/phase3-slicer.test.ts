@@ -4,17 +4,20 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { applyLeveling, capFirstLayers,
   buildGlb,
-  detectSlicers,
+  defaultPrinter,
   parsePrusaIni,
   parseSlicerVersion,
   preparePrint,
   prusaArgs,
+  prusaProfileIni,
   QD330_PLA_DEFAULTS,
   readGx,
-  resolveProfilePaths,
-  sliceStl,
+  SLICERS,
+  toSlicerInstall,
   validateGx,
   writeBinaryStl,
+  type ExecFileFn,
+  type MorphixSliceJob,
   type SlicerInfo,
 } from "@morphix/slicing";
 import { box, fakeSlicerExec, ORCA_GCODE, PRUSA_GCODE } from "./phase3-fixtures";
@@ -25,6 +28,11 @@ const ORCA: SlicerInfo = { kind: "orcaslicer", path: "/opt/OrcaSlicer/orca-slice
 const tmp = () => mkdtemp(join(tmpdir(), "morphix-p3-"));
 const NO_SLICER = { searchPath: [] as string[], env: {} };
 
+/** Slices through the adapter, for the QD330 by default. */
+function sliceWith(s: SlicerInfo, job: Partial<MorphixSliceJob> & { modelPath: string; outDir: string }, exec?: ExecFileFn) {
+  return SLICERS[s.kind].slice(toSlicerInstall(s), { printer: defaultPrinter(), filament: "pla", ...job }, { exec });
+}
+
 async function stlFile(): Promise<string> {
   const dir = await tmp();
   const p = join(dir, "in.stl");
@@ -33,10 +41,9 @@ async function stlFile(): Promise<string> {
 }
 
 describe("slicer profiles (UNVERIFIED)", () => {
-  it("are found and match the TypeScript defaults", async () => {
-    const p = resolveProfilePaths(PROFILES)!;
-    expect(p).not.toBeNull();
-    const ini = parsePrusaIni(await readFile(p.prusaIni, "utf8"));
+  it("are generated for the QD330 and match the TypeScript defaults", async () => {
+    const text = prusaProfileIni(defaultPrinter());
+    const ini = parsePrusaIni(text);
     expect(ini.nozzle_diameter).toBe(String(QD330_PLA_DEFAULTS.nozzleDiameterMm));
     expect(ini.temperature).toBe(String(QD330_PLA_DEFAULTS.nozzleTempC));
     expect(ini.bed_temperature).toBe(String(QD330_PLA_DEFAULTS.bedTempC));
@@ -45,15 +52,16 @@ describe("slicer profiles (UNVERIFIED)", () => {
     expect(ini.perimeters).toBe(String(QD330_PLA_DEFAULTS.perimeters));
     expect(ini.bed_shape).toBe("-110x-110,110x-110,110x110,-110x110");
     expect(ini.max_print_height).toBe("220");
-    expect(await readFile(p.prusaIni, "utf8")).toMatch(/UNVERIFIED/);
-    for (const f of [p.orcaMachine, p.orcaProcess, p.orcaFilament]) expect(JSON.parse(await readFile(f, "utf8"))._comment).toMatch(/UNVERIFIED/);
+    expect(text).toMatch(/UNVERIFIED/);
+    expect(await readFile(join(PROFILES, "qd330-pla-0.2mm.ini"), "utf8")).toBe(text); // the checked-in snapshot is current
+    for (const f of ["qd330-machine.json", "qd330-process-0.2mm.json"]) expect(JSON.parse(await readFile(join(PROFILES, "orcaslicer", f), "utf8"))._comment).toMatch(/UNVERIFIED/);
     expect(QD330_PLA_DEFAULTS.verified).toBe(false);
   });
 });
 
 describe("slicer detection", () => {
   it("returns nothing when no slicer is installed", async () => {
-    expect(await detectSlicers(NO_SLICER)).toEqual([]);
+    for (const a of Object.values(SLICERS)) expect(await a.detect(NO_SLICER)).toBeNull();
   });
 
   it("finds an executable on the search path and reads its version", async () => {
@@ -62,8 +70,8 @@ describe("slicer detection", () => {
     await writeFile(bin, "not really a slicer");
     await chmod(bin, 0o755);
     const { exec, calls } = fakeSlicerExec();
-    const found = await detectSlicers({ searchPath: [dir], env: {}, exec });
-    expect(found).toEqual([{ kind: "prusaslicer", path: bin, version: "2.9.0+linux-aarch64-GTK3" }]);
+    const found = await SLICERS.prusaslicer.detect({ searchPath: [dir], env: {}, exec });
+    expect(found).toEqual({ id: "prusaslicer", path: bin, version: "2.9.0+linux-aarch64-GTK3", via: "path", notes: [] });
     expect(calls).toEqual([{ file: bin, args: ["--help"] }]);
   });
 
@@ -72,8 +80,8 @@ describe("slicer detection", () => {
     const bin = join(dir, "custom-orca");
     await writeFile(bin, "x");
     await chmod(bin, 0o755);
-    const found = await detectSlicers({ searchPath: [], env: { MORPHIX_ORCA_SLICER: bin }, skipVersion: true });
-    expect(found).toEqual([{ kind: "orcaslicer", path: bin, version: null }]);
+    const found = await SLICERS.orcaslicer.detect({ searchPath: [], env: { MORPHIX_ORCA_SLICER: bin, DISPLAY: ":0" }, skipVersion: true });
+    expect(found).toEqual({ id: "orcaslicer", path: bin, version: null, via: "custom", notes: [] });
   });
 
   it("parses version banners", () => {
@@ -83,13 +91,13 @@ describe("slicer detection", () => {
   });
 });
 
-describe("sliceStl", () => {
+describe("slicing through the adapters", () => {
   it("reports 'slicer-not-installed' clearly", async () => {
-    const r = await sliceStl({ stlPath: await stlFile(), profilesDir: PROFILES, detect: NO_SLICER });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe("slicer-not-installed");
-      expect(r.message).toMatch(/apt install prusa-slicer/);
+    const r = await preparePrint({ inputPath: await stlFile(), options: { outputDir: await tmp(), detect: NO_SLICER } });
+    expect(r.slicer.ok).toBe(false);
+    if (!r.slicer.ok) {
+      expect(r.slicer.reason).toBe("slicer-not-installed");
+      expect(r.slicer.message).toMatch(/apt install prusa-slicer/);
     }
   });
 
@@ -97,19 +105,21 @@ describe("sliceStl", () => {
     const { exec, calls } = fakeSlicerExec();
     const stl = await stlFile();
     const out = await tmp();
-    const r = await sliceStl({ stlPath: stl, outDir: out, slicer: PRUSA, supports: "auto", profilesDir: PROFILES, exec });
+    const r = await sliceWith(PRUSA, { modelPath: stl, outDir: out, supports: "auto" }, exec);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(calls).toHaveLength(1);
     expect(calls[0].file).toBe(PRUSA.path);
     expect(calls[0].args).toEqual([
-      "--export-gcode", "--load", join(PROFILES, "qd330-pla-0.2mm.ini"), "--load", join(out, "filament-pla.ini"), "--output", join(out, "morphix.gcode"),
+      "--export-gcode", "--load", join(out, "printer-afinia-qd330.ini"), "--load", join(out, "filament-pla.ini"), "--output", join(out, "morphix.gcode"),
       "--center", "0,0", "--support-material", "--support-material-auto", stl,
     ]);
-    expect(r.gcodePath).toBe(join(out, "morphix.gcode"));
-    expect(r.estimates.printTimeS).toBe(3723);
-    expect(r.estimates.layerCount).toBe(3);
-    expect(r.profileVerified).toBe(false);
+    expect(await readFile(join(out, "printer-afinia-qd330.ini"), "utf8")).toBe(await readFile(join(PROFILES, "qd330-pla-0.2mm.ini"), "utf8"));
+    expect(r.rawGcodePath).toBe(join(out, "morphix.gcode"));
+    expect(r.format).toBe("gx");
+    expect(r.printablePath).toBe(join(out, "model.gx"));
+    expect(r.estimates?.printTimeS).toBe(3723);
+    expect(r.estimates?.layerCount).toBe(3);
   });
 
   it("builds override flags", () => {
@@ -122,26 +132,21 @@ describe("sliceStl", () => {
   it("runs OrcaSlicer with a per-job process file", async () => {
     const { exec, calls } = fakeSlicerExec(ORCA_GCODE);
     const out = await tmp();
-    const r = await sliceStl({ stlPath: await stlFile(), outDir: out, slicer: ORCA, supports: "auto", infillPercent: 25, profilesDir: PROFILES, exec });
+    const r = await sliceWith(ORCA, { modelPath: await stlFile(), outDir: out, supports: "auto", infillPercent: 25 }, exec);
     expect(r.ok).toBe(true);
     const args = calls[0].args;
     expect(args.slice(0, 2)).toEqual(["--slice", "0"]);
     const settings = args[args.indexOf("--load-settings") + 1].split(";");
     const proc = JSON.parse(await readFile(settings[1], "utf8"));
     expect(proc).toMatchObject({ enable_support: "1", sparse_infill_density: "25%" });
-    if (r.ok) expect(r.gcodePath).toBe(join(out, "plate_1.gcode"));
+    if (r.ok) expect(r.rawGcodePath).toBe(join(out, "plate_1.gcode"));
   });
 
   it("reports slicer failures with the log", async () => {
     const { exec } = fakeSlicerExec(PRUSA_GCODE, { code: 1, stderr: "Object outside print volume" });
-    const r = await sliceStl({ stlPath: await stlFile(), outDir: await tmp(), slicer: PRUSA, profilesDir: PROFILES, exec });
+    const r = await sliceWith(PRUSA, { modelPath: await stlFile(), outDir: await tmp() }, exec);
     expect(r).toMatchObject({ ok: false, reason: "slicer-failed" });
     if (!r.ok) expect(r.log).toMatch(/outside print volume/);
-  });
-
-  it("reports a missing profile directory", async () => {
-    const r = await sliceStl({ stlPath: "x.stl", slicer: PRUSA, profilesDir: join(await tmp(), "nope") });
-    expect(r).toMatchObject({ ok: false, reason: "profile-missing" });
   });
 });
 

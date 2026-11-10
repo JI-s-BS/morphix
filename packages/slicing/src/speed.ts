@@ -12,13 +12,14 @@ export const MIN_PRINT_SPEED_MMS = 20;
 /** Typical extrusion width for the 0.4 mm nozzle (mm). */
 const LINE_WIDTH_MM = 0.45;
 
-export function clampSpeed(mmS: number): number {
-  return Math.round(Math.min(QD330_MAX_SPEED_MMS, Math.max(MIN_PRINT_SPEED_MMS, mmS)));
+/** Clamps a print speed to 20 mm/s .. the printer's maximum (default the QD330's 600). */
+export function clampSpeed(mmS: number, maxMmS = QD330_MAX_SPEED_MMS): number {
+  return Math.round(Math.min(maxMmS, Math.max(MIN_PRINT_SPEED_MMS, mmS)));
 }
 
 /** PrusaSlicer keys: every print move at `speed`, first layer included; travel at least as fast. */
-export function prusaSpeedConfig(speedMmS: number): Record<string, number> {
-  const v = clampSpeed(speedMmS);
+export function prusaSpeedConfig(speedMmS: number, maxMmS = QD330_MAX_SPEED_MMS): Record<string, number> {
+  const v = clampSpeed(speedMmS, maxMmS);
   return {
     perimeter_speed: v,
     external_perimeter_speed: v,
@@ -31,26 +32,27 @@ export function prusaSpeedConfig(speedMmS: number): Record<string, number> {
     support_material_interface_speed: v,
     bridge_speed: v,
     first_layer_speed: Math.min(v, 20), // layer 1 at 20, layer 2 at 30 mm/s (gcode.ts capFirstLayers)
-    travel_speed: Math.max(v, Math.min(QD330_MAX_SPEED_MMS, 150)),
+    travel_speed: Math.max(v, Math.min(maxMmS, 150)),
   };
 }
 
 /** OrcaSlicer process keys for the same thing. */
-export function orcaSpeedConfig(speedMmS: number): Record<string, string> {
-  const v = String(clampSpeed(speedMmS));
-  const travel = String(Math.max(clampSpeed(speedMmS), 150));
+export function orcaSpeedConfig(speedMmS: number, maxMmS = QD330_MAX_SPEED_MMS): Record<string, string> {
+  const c = clampSpeed(speedMmS, maxMmS);
+  const v = String(c);
+  const travel = String(Math.max(c, Math.min(maxMmS, 150)));
   return {
     outer_wall_speed: v, inner_wall_speed: v, small_perimeter_speed: v, sparse_infill_speed: v,
     internal_solid_infill_speed: v, top_surface_speed: v, gap_infill_speed: v, support_speed: v,
-    support_interface_speed: v, bridge_speed: v, initial_layer_speed: String(Math.min(clampSpeed(speedMmS), 20)), initial_layer_infill_speed: String(Math.min(clampSpeed(speedMmS), 20)),
+    support_interface_speed: v, bridge_speed: v, initial_layer_speed: String(Math.min(c, 20)), initial_layer_infill_speed: String(Math.min(c, 20)),
     travel_speed: travel,
   };
 }
 
 /** Writes the speed overlay .ini (loaded after the base and filament profiles); returns its path. */
-export async function writePrusaSpeedIni(dir: string, speedMmS: number): Promise<string> {
-  const lines = [`# Morphix print speed ${clampSpeed(speedMmS)} mm/s for every layer (generated; see packages/slicing/src/speed.ts)`];
-  for (const [k, val] of Object.entries(prusaSpeedConfig(speedMmS))) lines.push(`${k} = ${val}`);
+export async function writePrusaSpeedIni(dir: string, speedMmS: number, maxMmS = QD330_MAX_SPEED_MMS): Promise<string> {
+  const lines = [`# Morphix print speed ${clampSpeed(speedMmS, maxMmS)} mm/s for every layer (generated; see packages/slicing/src/speed.ts)`];
+  for (const [k, val] of Object.entries(prusaSpeedConfig(speedMmS, maxMmS))) lines.push(`${k} = ${val}`);
   const path = join(dir, "morphix-speed.ini");
   await writeFile(path, lines.join("\n") + "\n", "utf8");
   return path;
@@ -60,9 +62,9 @@ export async function writePrusaSpeedIni(dir: string, speedMmS: number): Promise
  * What the filament allows at a layer height: the slicer slows any move whose plastic flow
  * would exceed the filament's melt limit (mm³/s ÷ layer height ÷ line width).
  */
-export function filamentSpeedLimit(maxVolumetricMm3S: number, layerHeightMm: number, lineWidthMm = LINE_WIDTH_MM): number {
-  if (!(maxVolumetricMm3S > 0) || !(layerHeightMm > 0)) return QD330_MAX_SPEED_MMS;
-  return Math.min(QD330_MAX_SPEED_MMS, Math.round(maxVolumetricMm3S / (layerHeightMm * lineWidthMm)));
+export function filamentSpeedLimit(maxVolumetricMm3S: number, layerHeightMm: number, lineWidthMm = LINE_WIDTH_MM, printerMaxMmS = QD330_MAX_SPEED_MMS): number {
+  if (!(maxVolumetricMm3S > 0) || !(layerHeightMm > 0)) return printerMaxMmS;
+  return Math.min(printerMaxMmS, Math.round(maxVolumetricMm3S / (layerHeightMm * lineWidthMm)));
 }
 
 // ------------------------------------------------------------- Z offset ---
@@ -85,14 +87,5 @@ export function profileZOffset(iniText: string): number | null {
 export async function writePrusaZOffsetIni(dir: string, zOffsetMm: number): Promise<string> {
   const path = join(dir, "morphix-z-offset.ini");
   await writeFile(path, `# Morphix Z offset chosen on the Prepare page\nz_offset = ${clampZOffset(zOffsetMm)}\n`, "utf8");
-  return path;
-}
-
-/** OrcaSlicer keeps z_offset in the machine profile: a copy with the chosen value. */
-export async function writeOrcaMachineWithZ(dir: string, machineJsonText: string, zOffsetMm: number): Promise<string> {
-  const json = JSON.parse(machineJsonText) as Record<string, unknown>;
-  json.z_offset = String(clampZOffset(zOffsetMm));
-  const path = join(dir, "morphix-machine.json");
-  await writeFile(path, JSON.stringify(json, null, 2), "utf8");
   return path;
 }

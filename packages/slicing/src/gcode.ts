@@ -264,9 +264,6 @@ function* iterateLines(text: string): Iterable<string> {
 export const FIRST_LAYER_CAPS_MMS = [20, 30];
 /** Travel-speed cap (X/Y moves without extrusion) during those layers, mm/s. */
 export const FIRST_LAYERS_TRAVEL_MAX_MMS = 100;
-/** @deprecated kept for older callers: the number of capped layers and the layer-2 cap. */
-export const FIRST_LAYERS = FIRST_LAYER_CAPS_MMS.length;
-export const FIRST_LAYERS_MAX_MMS = FIRST_LAYER_CAPS_MMS[FIRST_LAYER_CAPS_MMS.length - 1];
 
 /**
  * Slows the first layers whatever speed was sliced: printing moves (G1/G2/G3 with X/Y and E)

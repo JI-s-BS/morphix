@@ -36,10 +36,6 @@ export function meshFromSoup(soup: ArrayLike<number>): Mesh {
   return { positions, indices };
 }
 
-export function cloneMesh(mesh: Mesh): Mesh {
-  return { positions: mesh.positions.slice(), indices: mesh.indices.slice() };
-}
-
 export function computeBounds(mesh: Mesh): Bounds {
   const p = mesh.positions;
   const min = [Infinity, Infinity, Infinity];
@@ -171,12 +167,6 @@ export function flipAllWinding(mesh: Mesh): void {
 
 export function det3(m: Mat3): number {
   return m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
-}
-
-export function mulMat3(a: Mat3, b: Mat3): Mat3 {
-  const r = new Array(9).fill(0) as Mat3;
-  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) r[i * 3 + j] += a[i * 3 + k] * b[k * 3 + j];
-  return r;
 }
 
 /** Rotation (Rodrigues) that maps unit vector `from` onto unit vector `to`. */

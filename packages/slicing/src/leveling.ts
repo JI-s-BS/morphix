@@ -4,7 +4,7 @@
 // "one-click auto leveling" run by its own firmware. The guide says the printer "defaults to
 // the leveling operation before each print" and that it can be switched on in the printer's
 // settings ("enable automatic leveling before printing"). It does not name a G-code for it,
-// and no official Afinia .gx has been compared yet (docs/PHASE3.md), so Morphix has NO
+// and no official Afinia .gx has been compared yet (docs/QD330.md), so Morphix has NO
 // verified leveling command.
 //
 // So there are two modes:
@@ -12,7 +12,7 @@
 //     commands are written into the start G-code, after homing and with the bed at
 //     temperature, before the nozzle heats and primes. The command is G29, the conventional
 //     bed-leveling G-code; MORPHIX_LEVEL_GCODE replaces it with what an official Afinia .gx
-//     actually uses once one has been read (checklist L2, docs/PHASE5.md).
+//     actually uses once one has been read (checklist L2, docs/SAFETY.md).
 //   - "printer" (MORPHIX_LEVELING=printer): nothing is added; the QD330's own pre-print routine
 //     levels the bed ("automatic leveling before printing" on at the printer, checklist L1).
 

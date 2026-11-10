@@ -1,11 +1,10 @@
-// Print preparation (Phase 3). Phase 1 only provides build-volume checks used by
-// the viewer; slicing is delegated to an existing engine (OrcaSlicer/PrusaSlicer,
-// validated against official Afinia slicer output) — never a slicer written from scratch.
+// Print preparation: mesh repair / orientation / placement, then slicing through an installed
+// slicer (PrusaSlicer, OrcaSlicer or Bambu Studio, ./adapters) with a profile generated from
+// the printer catalog, into the file the printer takes (.gcode, .gx, .gcode.3mf). Morphix never
+// slices itself. Generated profiles and the .gx layout are UNVERIFIED until printed.
 import { fitsBuildVolume } from "@morphix/domain";
 import { QD330_BUILD_VOLUME_MM } from "@morphix/shared";
 
-// Phase 3 print-preparation engine (see docs/PHASE3.md). Anything that touches the
-// QD330 file format or slicer profiles is UNVERIFIED against official Afinia output.
 export * from "./mesh";
 export * from "./stl";
 export * from "./glb";
@@ -78,4 +77,4 @@ export function heightForDimension(native: { x: number; y: number; z: number }, 
   return (sizeMm / along) * native.z;
 }
 export * from "./speed";
-export * from "./adapters/types";
+export * from "./adapters";
