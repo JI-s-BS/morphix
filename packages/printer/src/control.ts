@@ -89,6 +89,19 @@ export class RateLimitedError extends Error {
 }
 /** Heating without an explicit `approvedBy`. Nothing is sent. */
 export class HeaterApprovalError extends Error {}
+/** The printer's state does not allow the operation (e.g. not READY). Nothing is sent. */
+export class PrinterStateError extends Error {}
+
+/** Why an operation did not complete, for callers that map results to their own error codes. */
+export type ControlFailure = "unreachable" | "timeout" | "refused" | "state" | "rejected" | "unconfirmed";
+
+function classifyFailure(e: unknown): ControlFailure {
+  if (e instanceof PrinterStateError) return "state";
+  if (e instanceof ControlRefusedError) return "refused";
+  if (e instanceof PrinterReplyTimeout) return /cannot reach/.test((e as Error).message) ? "unreachable" : "timeout";
+  if (e instanceof PrinterConnectionClosed) return "unreachable";
+  return "rejected";
+}
 
 export const STATUS_READY = "READY";
 export const STATUS_BUILDING = "BUILDING_FROM_SD";
@@ -130,6 +143,8 @@ export interface ControlResult<T = undefined> {
   /** Raw reply to the control command. */
   reply?: string;
   error?: string;
+  /** Set whenever the operation did not complete; "unconfirmed" = acknowledged, but the status never showed the change. */
+  failure?: ControlFailure;
   /** Extra context, e.g. why a result cannot be confirmed (the printer has no read-back for fan or motors). */
   note?: string;
   data?: T;
@@ -561,7 +576,7 @@ export class QD330Controller {
       r.data = { fileName, bytes: bytes.length, packets: total };
       const before = await this.statusIn(s);
       r.status = before;
-      if (before.machine !== STATUS_READY) throw new Error(`printer is ${describe(before)}; uploads are only allowed when READY`);
+      if (before.machine !== STATUS_READY) throw new PrinterStateError(`printer is ${describe(before)}; uploads are only allowed when READY`);
       const existing = await this.listIn(s);
       if (!opts.overwrite && existing.some((f) => f.name === fileName)) throw new Error(`${fileName} already exists on the printer`);
 
@@ -620,7 +635,7 @@ export class QD330Controller {
     return this.run("start", meta, true, async (s, r) => {
       const before = await this.statusIn(s);
       r.status = before;
-      if (before.machine !== STATUS_READY) throw new Error(`printer is ${describe(before)}; a print can only start from READY`);
+      if (before.machine !== STATUS_READY) throw new PrinterStateError(`printer is ${describe(before)}; a print can only start from READY`);
       const files = await this.listIn(s);
       if (!files.some((f) => f.name === fileName)) throw new Error(`${fileName} is not stored on the printer`);
       // Consume right before sending, so a busy printer or missing file doesn't burn the approval.
@@ -652,8 +667,8 @@ export class QD330Controller {
       const before = await this.statusIn(s);
       r.status = before;
       meta.fileName = before.currentFile;
-      if (isPausedStatus(before, this.o.pausedStatuses)) throw new Error("the print is already paused");
-      if (before.machine !== STATUS_BUILDING) throw new Error(`printer is ${describe(before)}; nothing to pause`);
+      if (isPausedStatus(before, this.o.pausedStatuses)) throw new PrinterStateError("the print is already paused");
+      if (before.machine !== STATUS_BUILDING) throw new PrinterStateError(`printer is ${describe(before)}; nothing to pause`);
       r.sent = true;
       r.reply = await s.command("M25");
       r.acknowledged = isAcknowledged(r.reply, "M25");
@@ -674,7 +689,7 @@ export class QD330Controller {
     return this.run("resume", meta, false, async (s, r) => {
       const before = await this.statusIn(s);
       r.status = before;
-      if (!isPausedStatus(before, this.o.pausedStatuses)) throw new Error(`printer is ${describe(before)}; nothing to resume`);
+      if (!isPausedStatus(before, this.o.pausedStatuses)) throw new PrinterStateError(`printer is ${describe(before)}; nothing to resume`);
       if (before.currentFile && !fileMatches(before.currentFile, fileName)) {
         throw new Error(`paused file is ${before.currentFile}, not ${fileName}`);
       }
@@ -974,7 +989,7 @@ export class QD330Controller {
         const before = await this.fullStatusIn(s);
         r.status = before;
         if (target > 0) {
-          if (isPrinting(before, this.o.pausedStatuses)) throw new Error(`printer is ${describe(before)}; temperatures are not changed during a print`);
+          if (isPrinting(before, this.o.pausedStatuses)) throw new PrinterStateError(`printer is ${describe(before)}; temperatures are not changed during a print`);
           this.requireState("ready", before);
           // Armed before sending: if the reply is lost the heater may still be on.
           this.heaterTargets[heater] = target;
@@ -1118,13 +1133,13 @@ export class QD330Controller {
 
   private requireState(rule: StateRule, st: PrinterStatus) {
     const problem = stateProblem(rule, st, this.o.pausedStatuses, false);
-    if (problem) throw new Error(problem);
+    if (problem) throw new PrinterStateError(problem);
   }
 
   /** Heaters may be turned down unless a print is running, or during one that was cancelled moments ago. */
   private requireCooling(st: PrinterStatus) {
     if (isPrinting(st, this.o.pausedStatuses) && !this.recentCancel()) {
-      throw new Error(`printer is ${describe(st)}; temperatures are not changed during a print (cancel it first)`);
+      throw new PrinterStateError(`printer is ${describe(st)}; temperatures are not changed during a print (cancel it first)`);
     }
   }
 
@@ -1229,9 +1244,11 @@ export class QD330Controller {
       try {
         if (droppable && gen !== this.interruptGen) throw new Error(`not sent: an emergency stop was requested before ${op} could run`);
         await this.withSession((s) => body(s, r));
+        if (!r.confirmed && r.error) r.failure = r.acknowledged ? "unconfirmed" : "rejected";
       } catch (e) {
         r.confirmed = false;
         r.error = (e as Error).message;
+        r.failure = classifyFailure(e);
       }
       this.emitLog(op, meta, r);
       return r;
