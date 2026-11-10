@@ -1,0 +1,61 @@
+/* Setup wizard, sign-in and System setup. Uses the theme tokens from styles.css. */
+.su-screen { position: fixed; inset: 0; overflow-y: auto; background: var(--bg); padding: 24px 16px 48px; user-select: text; z-index: 5; }
+.su-wrap { max-width: 780px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.su-brand { font-weight: 850; font-size: 30px; text-align: center; }
+.su-brand span { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; color: transparent; }
+.su-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px 22px; display: flex; flex-direction: column; gap: 12px; }
+.su-card h2 { margin: 0; font-size: 24px; }
+.su-card h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.su-lead { margin: 0; color: var(--muted); }
+
+.su-steps { display: flex; gap: 6px; }
+.su-steps > div { flex: 1; text-align: center; font-size: 13px; font-weight: 750; color: var(--muted); }
+.su-steps > div::before { content: ""; display: block; height: 8px; border-radius: 99px; background: var(--panel-2); margin-bottom: 6px; border: 1px solid var(--line); }
+.su-steps > div.done::before, .su-steps > div.on::before { background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-color: transparent; }
+.su-steps > div.on { color: var(--accent); }
+
+.su-field { display: flex; flex-direction: column; gap: 6px; }
+.su-field > span { font-weight: 750; }
+.su-field small { color: var(--muted); font-size: 14px; }
+.su-input {
+  min-height: 56px; padding: 0 16px; border-radius: 16px; border: 2px solid var(--line); background: var(--panel-2);
+  color: var(--text); font: inherit; font-size: 18px; width: 100%; user-select: text;
+}
+.su-input:focus { outline: none; border-color: var(--accent); }
+.su-input[aria-invalid="true"] { border-color: var(--bad); }
+
+.su-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+.su-actions .spacer { flex: 1; }
+
+.su-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.su-pick {
+  min-height: 72px; padding: 12px 16px; border-radius: 18px; border: 2px solid var(--line); background: var(--panel-2);
+  font-weight: 800; font-size: 17px; text-align: left; display: flex; flex-direction: column; justify-content: center; gap: 2px;
+}
+.su-pick small { font-weight: 600; color: var(--muted); font-size: 13.5px; }
+.su-pick.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent) inset; }
+.su-pick:disabled { opacity: .5; }
+
+.su-msg { border-radius: 16px; padding: 12px 16px; font-weight: 700; border: 2px solid; }
+.su-msg.bad { background: var(--err-bg); border-color: var(--err-line); color: var(--err-text); }
+.su-msg.ok { background: var(--info-bg); border-color: var(--info-line); color: var(--info-text); }
+.su-msg.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-text); }
+.su-msg small { display: block; font-weight: 600; margin-top: 4px; }
+
+.su-row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.su-row:last-child { border-bottom: 0; }
+.su-row .grow { flex: 1; min-width: 200px; }
+.su-tag { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 13px; font-weight: 750; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+.su-tag.ok { color: var(--ok); border-color: var(--ok); }
+.su-tag.warn { color: var(--warn); border-color: var(--warn); }
+.su-link { color: var(--accent); font-weight: 750; }
+.su-toggle { min-width: 96px; }
+
+.su-system { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; min-height: 0; user-select: text; }
+.su-system .su-card { padding: 16px 18px; }
+
+@media (max-width: 560px) {
+  .su-screen { padding: 16px 12px 40px; }
+  .su-steps > div { font-size: 0; }
+  .su-card { padding: 16px; }
+}

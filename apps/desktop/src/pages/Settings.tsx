@@ -4,20 +4,24 @@ import { api } from "../bridge";
 import { speakerTest } from "../audio";
 import { NetworkPanel } from "./Network";
 import { useTheme, type ThemeChoice } from "../theme";
+import { SystemSetup, useSetupSession } from "./setup";
 
 const KEY_LABELS: Record<keyof AppSettings["keys"], string> = {
   gemini: "Gemini", meshy: "Meshy", claude: "Claude", vultr: "Vultr", tiger: "Tiger Data", swarms: "Swarms", auth0: "Auth0",
 };
 
 export function SettingsPage({ settings, onError }: { settings: AppSettings | null; onError: (m: string) => void }) {
-  const [tab, setTab] = useState<"general" | "network">("general");
+  const [tab, setTab] = useState<"general" | "network" | "system">("general");
   return (
     <div className="page">
       <div className="tabs">
         <button className={tab === "general" ? "on" : ""} onClick={() => setTab("general")}>General</button>
         <button className={tab === "network" ? "on" : ""} onClick={() => setTab("network")}>Network</button>
+        <button className={tab === "system" ? "on" : ""} onClick={() => setTab("system")}>System setup</button>
       </div>
-      <div className="tab-body">{tab === "general" ? <General settings={settings} onError={onError} /> : <NetworkPanel onError={onError} />}</div>
+      <div className="tab-body">
+        {tab === "general" ? <General settings={settings} onError={onError} /> : tab === "network" ? <NetworkPanel onError={onError} /> : <SystemSetup />}
+      </div>
     </div>
   );
 }
@@ -43,6 +47,7 @@ function General({ settings, onError }: { settings: AppSettings | null; onError:
   const gb = (b: number) => `${(b / 1e9).toFixed(1)} GB`;
   const ai = settings?.ai;
   const theme = useTheme();
+  const setup = useSetupSession();
   const THEMES: [ThemeChoice, string][] = [["auto", "🌗 Auto"], ["light", "☀️ Light"], ["dark", "🌙 Dark"]];
   return (
     <div className="settings-grid">
@@ -81,7 +86,11 @@ function General({ settings, onError }: { settings: AppSettings | null; onError:
               <span style={{ color: settings.keys[k] ? "var(--ok)" : "var(--muted)" }}>{settings.keys[k] ? "Key present" : "Not configured"}</span>
             </div>
           ))}
-        <div className="muted small" style={{ marginTop: 6 }}>Keys live in {settings?.storageRoot}/config/morphix.env on the Pi and never reach this screen.</div>
+        <div className="muted small" style={{ marginTop: 6 }}>
+          {setup.available
+            ? "Keys stay on the Morphix machine and never reach this screen. Change them under System setup."
+            : `Keys live in ${settings?.storageRoot ?? "~/Morphix"}/config/morphix.env on the Pi and never reach this screen.`}
+        </div>
       </div>
       <div className="card">
         <h3>📱 Morphix Remote</h3>
