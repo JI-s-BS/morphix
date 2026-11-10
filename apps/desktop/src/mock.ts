@@ -1,5 +1,5 @@
-// In-browser stand-in for the Electron bridge, used only when the UI is
-// previewed outside Electron (vite preview). It never touches the printer.
+// In-browser stand-in for the Morphix server, used only in `vite dev` previews with
+// VITE_MORPHIX_MOCK=1 (see bridge.ts). It never touches the printer.
 import type { AssistantTurn, GenerationProgress, MorphixApi, ModelVersion, PrinterStatus, Project } from "@morphix/shared";
 
 const mockFilaments: import("@morphix/shared").FilamentState = {
@@ -127,8 +127,8 @@ export function createMockApi(): MorphixApi {
     machineCapabilities: async () => ["setLight", "setFan", "home", "setNozzleTemp", "coolDown", "emergencyStop"].map((command) => ({ command, verified: command === "home", enabled: true, allowedNow: true })),
     jobs: async () => [{ id: "j1", kind: "text-to-print", title: "Cute dragon", status: "running", percent: 42, currentStage: "generate", updatedAt: t(),
       stages: [{ key: "understand", label: "Understanding your idea", status: "done", progress: 100 }, { key: "generate", label: "Creating your 3D model", status: "running", progress: 60, detail: "Meshy: building the 3D shape" }, { key: "download", label: "Bringing the model home", status: "pending", progress: 0 }, { key: "prepare.slice", label: "Cutting it into thin layers", status: "pending", progress: 0 }], error: null }],
-    portalInfo: async () => ({ running: true, url: "http://192.168.86.38:8443", authConfigured: false, missing: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID"] }),
-    remotePairing: async () => ({ running: true, qrDataUrl: null, expiresAt: null, message: "QR pairing is available on the Pi." }),
+    portalInfo: async () => ({ running: false, url: null, authConfigured: false, missing: [] }),
+    remotePairing: async () => ({ running: false, qrDataUrl: null, expiresAt: null, message: "Open this Morphix's web address on your phone instead." }),
     requestPrint: async () => {},
     printStatus: async () => ({ enabled: false, gxVerified: false, job: null, busy: null, lastMessage: null }),
     pausePrint: async () => ({ ok: false, message: "preview" }),

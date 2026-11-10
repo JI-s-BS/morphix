@@ -1,36 +1,9 @@
-// Tiger Data (guardian history), Vultr (backup error diagnosis) and the Claude→Vultr chain.
-// Fake database and network only.
+// Vultr (backup error diagnosis) and the Claude→Vultr chain (packages/healer). Fake network only.
+// (The Tiger Data sink was removed with the sponsor wiring; the app no longer uses Vultr either.)
 import { describe, expect, it } from "vitest";
-import { createTigerSink, type PgPoolLike } from "../apps/desktop/electron/tiger";
 import { createVultrDiagnoser, firstDiagnoser, pickVultrModel, vultrDiagnoserFromEnv } from "@morphix/healer";
 
 const incident: any = { incident: { kind: "unknown-error", what: "printer said E12", code: null, context: {} }, logLines: ["{\"level\":\"error\"}"], remediations: [{ id: "reconnectGemini", label: "Reconnect Gemini" }] };
-
-describe("Tiger Data sink", () => {
-  it("creates the hypertable once and inserts records with parameters", async () => {
-    const queries: { text: string; values?: unknown[] }[] = [];
-    const pool: PgPoolLike = { query: async (text, values) => (queries.push({ text, values }), { rows: [] }) };
-    const sink = createTigerSink("postgres://x", { device: "pi", pool: async () => pool });
-    await sink.insert([{ at: "2026-11-08T05:00:00Z", sessionId: "s1", type: "transition", state: "watching", data: { from: "idle" } }]);
-    await sink.insert([{ at: "2026-11-08T05:00:10Z", sessionId: "s1", type: "event", kind: "spaghetti", value: 0.8 }]);
-    expect(queries[0].text).toMatch(/CREATE TABLE IF NOT EXISTS guardian_telemetry/);
-    expect(queries[1].text).toMatch(/create_hypertable/);
-    expect(queries.filter((q) => /CREATE TABLE/.test(q.text))).toHaveLength(1); // set up once
-    const inserts = queries.filter((q) => q.text.startsWith("INSERT"));
-    expect(inserts).toHaveLength(2);
-    expect(inserts[0].values).toEqual(["2026-11-08T05:00:00Z", "pi", "s1", "transition", null, "watching", null, '{"from":"idle"}']);
-    expect(inserts[1].text).not.toContain("spaghetti"); // values never pasted into SQL
-  });
-
-  it("works on plain Postgres (no TimescaleDB) and retries the connection after a failure", async () => {
-    let attempts = 0;
-    const pool: PgPoolLike = { query: async (text) => { if (/create_hypertable/.test(text)) throw new Error("no timescaledb"); return {}; } };
-    const sink = createTigerSink("postgres://x", { pool: async () => { if (++attempts === 1) throw new Error("offline"); return pool; } });
-    await expect(sink.insert([{ at: "t", sessionId: null, type: "x" }])).rejects.toThrow(/offline/);
-    await expect(sink.insert([{ at: "t", sessionId: null, type: "x" }])).resolves.toBeUndefined();
-    expect(attempts).toBe(2);
-  });
-});
 
 describe("Vultr diagnoser", () => {
   it("picks a chat model, asks for JSON and parses the diagnosis", async () => {

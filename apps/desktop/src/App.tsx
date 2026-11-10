@@ -16,6 +16,7 @@ import { PrinterPage } from "./pages/Printer";
 import { ControlPage } from "./pages/Control";
 import { SettingsPage } from "./pages/Settings";
 import { PreparePage } from "./pages/Prepare";
+import { SetupGate } from "./pages/setup";
 
 export type Page = "assistant" | "library" | "viewer" | "prepare" | "printer" | "control" | "settings";
 type RailPage = Exclude<Page, "prepare">;
@@ -160,7 +161,16 @@ function GrownUpButton({ active, onOpen }: { active: boolean; onOpen: () => void
   );
 }
 
+/** The setup page (first run, sign-in) comes first; then the app. */
 export function App() {
+  return (
+    <SetupGate>
+      <MorphixApp />
+    </SetupGate>
+  );
+}
+
+function MorphixApp() {
   const [page, setPage] = useState<Page>("assistant");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [printer, setPrinter] = useState<PrinterStatus | null>(null);
@@ -315,7 +325,7 @@ export function App() {
   const pDot = !printer ? "" : printer.online ? (printer.machine === "READY" ? "ok" : "warn") : "bad";
   // The QD330 stays BUILDING_FROM_SD while paused; MoveMode says PAUSED.
   const paused = printer?.online && (/paus/i.test(printer.machine ?? "") || /paus/i.test(printer.moveMode ?? ""));
-  const pText = !printer ? "Printer…" : !printer.online ? "QD330 offline" : paused ? "QD330 · paused" : `QD330 · ${(printer.machine ?? "online").replaceAll("_", " ").toLowerCase()}`;
+  const pText = !printer ? "Printer…" : !printer.online ? "Printer offline" : paused ? "Printer · paused" : `Printer · ${(printer.machine ?? "online").replaceAll("_", " ").toLowerCase()}`;
   const aiChip = !settings ? null : settings.ai.assistant === "gemini-live" && settings.ai.generator === "meshy"
     ? <span className="chip"><span className={`dot ${state === "offline" ? "bad" : "ok"}`} />Gemini + Meshy{settings.keys.claude ? " + Claude" : ""}</span>
     : <span className="chip"><span className="dot bad" />{settings.ai.assistant !== "gemini-live" && settings.ai.generator !== "meshy" ? "AI keys missing" : settings.ai.assistant !== "gemini-live" ? "Gemini key missing" : "Meshy key missing"}</span>;

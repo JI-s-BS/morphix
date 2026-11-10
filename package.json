@@ -7,12 +7,12 @@
   "scripts": {
     "build:main": "node scripts/build-main.mjs",
     "build:renderer": "vite build --config apps/desktop/vite.config.ts",
-    "build:remote": "vite build --config apps/remote/vite.config.ts",
-    "build": "npm run build:main && npm run build:renderer",
+    "build:server": "node scripts/build-server.mjs",
+    "build": "npm run build:server && npm run build:renderer && npm run build:main",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "dev:renderer": "vite --config apps/desktop/vite.config.ts",
-    "dev:remote": "vite --config apps/remote/vite.config.ts --port 5174",
+    "start:server": "node apps/server/dist/server.cjs",
     "start": "electron ."
   },
   "dependencies": {

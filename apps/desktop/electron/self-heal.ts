@@ -3,15 +3,14 @@
 // whitelisted, non-physical, non-costly fixes (packages/healer). It never starts a print,
 // heats, cancels a real print or spends Meshy credits. Everything is injected, so this file
 // does not import main.ts and is tested with fakes (tests/self-heal*.test.ts).
-import type { AppEvent } from "@morphix/shared";
+import type { AppEvent, PrinterStatus } from "@morphix/shared";
 import { isKnownErrorCode } from "@morphix/errors";
 import {
-  claudeDiagnoserFromEnv, cleanOldFiles, defaultCleanTargets, firstDiagnoser, Healer, vultrDiagnoserFromEnv,
+  claudeDiagnoserFromEnv, cleanOldFiles, defaultCleanTargets, firstDiagnoser, Healer,
   type Diagnoser, type HealActions, type HealerConfig, type HealProbes, type HealRecord, type Incident, type JobEventLike, type JobLike, type Limits, type RemediationId,
 } from "@morphix/healer";
 import type { Logger, Storage } from "@morphix/storage";
 import type { MorphixDb } from "@morphix/database";
-import type { PrinterObserver } from "@morphix/printer";
 import type { Jobs } from "./jobs";
 import type { Printing } from "./printing";
 import type { VoiceController } from "./voice";
@@ -94,8 +93,8 @@ export function installSelfHealing(deps: SelfHealDeps): SelfHealing {
     recentLogLines: logger.tail ? (n) => logger.tail!(n) : undefined,
     ...(deps.probes ?? {}),
   };
-  // Claude explains unknown errors; a Vultr-hosted open model takes over when Claude is unavailable.
-  const diagnose = deps.diagnose !== undefined ? deps.diagnose : firstDiagnoser([claudeDiagnoserFromEnv(env), vultrDiagnoserFromEnv(env)]);
+  // Claude explains unknown errors (none without ANTHROPIC_API_KEY).
+  const diagnose = deps.diagnose !== undefined ? deps.diagnose : firstDiagnoser([claudeDiagnoserFromEnv(env)]);
 
   const healer = new Healer({
     actions,
@@ -161,7 +160,8 @@ export interface AppParts {
   log: Logger;
   emit: (e: AppEvent) => void;
   jobs: Jobs;
-  printer: PrinterObserver;
+  /** PrinterObserver (QD330) or the server's DriverObserver. */
+  printer: { readonly status: PrinterStatus; poll(): Promise<PrinterStatus>; start(ms: number): void };
   printing: Printing;
   voice: VoiceController;
   generation: Generation;

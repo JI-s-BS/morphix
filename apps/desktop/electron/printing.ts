@@ -14,8 +14,7 @@ import { clampSpeed, clampZOffset, MAX_Z_OFFSET_MM, MIN_Z_OFFSET_MM, profileZOff
 import { preparePrint } from "@morphix/slicing";
 import { toMorphixError } from "@morphix/errors";
 import { JobTracker, PrintAuthorizer, QD330Controller, detectActivePrint, isPausedStatus, remainingSeconds, type ApprovalSource, type MachineApprovalSource, type RequestedBy, type UnverifiedCommandFlags } from "@morphix/printer";
-import { PrintGuardian, applyGuardianSchema, geminiVisionFromEnv, swarmsFromEnv, telemetryFromEnv, type GuardianSnapshot, type GuardianStore } from "@morphix/guardian";
-import { createTigerSink } from "./tiger";
+import { PrintGuardian, applyGuardianSchema, geminiVisionFromEnv, type GuardianSnapshot, type GuardianStore } from "@morphix/guardian";
 import { type Ctx, now } from "./context";
 import type { Jobs } from "./jobs";
 
@@ -127,13 +126,6 @@ export class Printing {
           : undefined,
       },
       gemini: geminiVisionFromEnv(process.env),
-      // Swarms: a multi-agent second opinion on each confirmed alert (local rules without a key).
-      swarms: process.env.SWARMS_API_KEY?.trim() ? swarmsFromEnv(process.env) : undefined,
-      // Tiger Data: guardian history into a TimescaleDB hypertable (TIGER_DATABASE_URL).
-      telemetry: telemetryFromEnv(
-        process.env,
-        process.env.TIGER_DATABASE_URL?.trim() ? createTigerSink(process.env.TIGER_DATABASE_URL.trim(), { log: (m, x) => ctx.log.write("info", m, x) }) : undefined,
-      ),
       store: this.store(),
       log: (l) => ctx.log.write("info", `[guardian] ${l}`),
     });
