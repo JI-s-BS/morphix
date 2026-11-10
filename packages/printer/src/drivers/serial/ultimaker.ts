@@ -223,7 +223,7 @@ function asDriverError(e: unknown): DriverError {
   return new DriverError("protocol", (e as Error)?.message ?? String(e), "Try again; if it keeps failing, restart the printer.");
 }
 
-function target(config: DriverConfig, deps: DriverDeps | undefined, timeoutMs: number): HttpTarget {
+function target(deps: DriverDeps | undefined, timeoutMs: number): HttpTarget {
   return { fetch: deps?.fetch ?? fetch, timeoutMs, what: "Ultimaker" };
 }
 
@@ -248,7 +248,7 @@ export function createUltimakerDriver(options: UltimakerOptions = {}): PairableD
     pairing: {
       async start(config, deps) {
         try {
-          const t = target(config, deps, opts.timeoutMs);
+          const t = target(deps, opts.timeoutMs);
           const res = await request(t, `${baseUrl(config.host)}/api/v1/auth/request`, {
             method: "POST",
             body: new URLSearchParams({ application: "Morphix", user: "Morphix" }),
@@ -265,7 +265,7 @@ export function createUltimakerDriver(options: UltimakerOptions = {}): PairableD
         try {
           const id = String(config.authId ?? "").trim();
           if (!/^[\w-]+$/.test(id)) return { state: "failed", message: "No pairing in progress", hint: "Press 'Pair' to start." };
-          const t = target(config, deps, opts.timeoutMs);
+          const t = target(deps, opts.timeoutMs);
           const res = await request(t, `${baseUrl(config.host)}/api/v1/auth/check/${encodeURIComponent(id)}`);
           const body = await readJson<{ message?: string }>(t, await expectOk(t, res, "the pairing check"));
           if (body.message === "authorized") return { state: "paired", message: "Paired with the Ultimaker" };
