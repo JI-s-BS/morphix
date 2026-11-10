@@ -2,18 +2,20 @@
 // exports when they exist and falls back to safe defaults when they don't:
 //   createConfigStore(dataDir)            → ConfigStore
 //   createAuthProvider(store)             → AuthProvider
-//   createSetupRoutes({ store, auth, csrfToken }) → RouteModule | RouteModule[]
-//   resetAdmin(store)                     → Promise<string | void>   (`server.cjs reset-admin`)
+//   createSetupRoutes({ store, auth, csrfToken, slicerAdapters }) → RouteModule | RouteModule[]
+//   resetAdmin(store)                     → Promise<string | void>   (`server.cjs reset-admin`; the text holds a
+//                                           one-time password: printed to the terminal once, never logged)
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import * as configModule from "@morphix/config";
 import type { AuthProvider, AuthUser, ConfigStore, MorphixConfig, RouteModule } from "@morphix/config";
+import type { SlicerAdapter } from "@morphix/slicing";
 
 export interface SetupModule {
   createConfigStore?: (dataDir: string) => ConfigStore;
   createAuthProvider?: (store: ConfigStore) => AuthProvider;
-  createSetupRoutes?: (deps: { store: ConfigStore; auth: AuthProvider; csrfToken: (req: IncomingMessage) => string }) => RouteModule | RouteModule[];
+  createSetupRoutes?: (deps: { store: ConfigStore; auth: AuthProvider; csrfToken: (req: IncomingMessage) => string; slicerAdapters?: readonly SlicerAdapter[] }) => RouteModule | RouteModule[];
   resetAdmin?: (store: ConfigStore) => Promise<string | void> | string | void;
 }
 

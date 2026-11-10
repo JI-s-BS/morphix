@@ -14,6 +14,7 @@ import { createCore, readVersion } from "./core";
 import { createHttpApp } from "./http";
 import { mountRoutes } from "./router";
 import { DEV_LOOPBACK_AUTH, NO_AUTH, ReadOnlyConfigStore, isLoopback, loadSetupModule } from "./setup-module";
+import { installedAdapters } from "./slicers";
 import { selfSignedCert } from "./tls";
 
 export function dataDirFromEnv(env = process.env): string {
@@ -101,7 +102,7 @@ async function main(argv: string[]): Promise<void> {
   });
   const csrfToken = (req: import("node:http").IncomingMessage) => app.router.csrfToken(req);
   if (setup.createSetupRoutes) {
-    mountRoutes(app.router, setup.createSetupRoutes({ store, auth, csrfToken }));
+    mountRoutes(app.router, setup.createSetupRoutes({ store, auth, csrfToken, slicerAdapters: installedAdapters() }));
   }
 
   let server: Server;

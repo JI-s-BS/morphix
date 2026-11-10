@@ -51,7 +51,8 @@ export function createHttpApp(o: HttpAppOptions): HttpApp {
   // The CSRF token (also in the morphix_csrf cookie) and who is signed in.
   router.add("GET", "/api/session", "public", async (ctx) => {
     const csrfToken = router.csrfToken(ctx.req, ctx.res);
-    ctx.send(200, { csrfToken, user: ctx.user, setupOpen: await o.auth.setupOpen() });
+    // `csrf` is the name the setup page reads; `csrfToken` the HTTP client's.
+    ctx.send(200, { csrf: csrfToken, csrfToken, user: ctx.user, setupOpen: await o.auth.setupOpen() });
   });
   router.add("GET", "/api/camera/stream", "user", (ctx) => proxyCamera(o.camera?.().stream ?? null, ctx.res));
   router.add("GET", "/api/camera/snapshot", "user", (ctx) => proxyCamera(o.camera?.().snapshot ?? null, ctx.res));

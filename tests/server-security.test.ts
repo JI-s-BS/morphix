@@ -29,6 +29,7 @@ describe("CSRF", () => {
     expect(cookie).toMatch(/SameSite=Strict/);
     expect(cookie).not.toMatch(/HttpOnly/); // the page must read it
     expect(j.csrfToken).toBe(c.cookies.get(CSRF_COOKIE));
+    expect(j.csrf).toBe(j.csrfToken); // the setup page reads `csrf`
     expect(j).toMatchObject({ user: null, setupOpen: false });
     // The same browser keeps its token.
     expect((await (await c.fetch("/api/session")).json()).csrfToken).toBe(j.csrfToken);
