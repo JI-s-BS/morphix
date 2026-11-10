@@ -1,4 +1,4 @@
-// Photo -> printable model pipeline (see docs/PHOTO3D.md).
+// Photo -> printable model pipeline (see docs/AI.md).
 export * from "./errors";
 export * from "./images";
 export * from "./gemini";

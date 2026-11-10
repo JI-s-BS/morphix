@@ -1,5 +1,5 @@
-// MX-P3D-nnn error codes for the photo-to-model pipeline (see docs/PHOTO3D.md).
-// Codes are stable: the coordinator folds them into the shared error registry.
+// MX-P3D-nnn error codes for the photo-to-model pipeline (see docs/AI.md).
+// Codes are stable; they are registered in the shared error registry (@morphix/errors).
 // The tens digit groups the area: 00x input, 01x Gemini, 02x Meshy, 03x OpenSCAD,
 // 04x scan import, 05x output checks, 06x photo cleanup, 07x CAD route, 08x phone plans, 09x pipeline.
 

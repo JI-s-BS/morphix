@@ -1,7 +1,7 @@
 // PrintGuardian: wires the vision worker, the alert state machine, Gemini
 // verification, a local review and a persistence hook together.
 // Electron main process only. It never sends anything to the printer; pausing
-// goes through AlertMachineOptions.pauseHook (Phase 5) or the operator.
+// goes through AlertMachineOptions.pauseHook (the printer controller) or the operator.
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import { AlertStateMachine, STATE_LABELS, defaultIsPaused } from "./alerts";

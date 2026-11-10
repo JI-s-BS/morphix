@@ -1,5 +1,5 @@
-// MX-CAD-nnn error codes for the Claude + OpenSCAD generator (see docs/CAD.md).
-// Codes are stable: the coordinator folds them into the shared error registry.
+// MX-CAD-nnn error codes for the Claude + OpenSCAD generator (see docs/AI.md).
+// Codes are stable; they are registered in the shared error registry (@morphix/errors).
 // 00x input/config, 01x Claude API, 02x OpenSCAD, 03x output checks.
 
 export const CAD_ERRORS = {

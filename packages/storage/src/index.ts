@@ -1,4 +1,4 @@
-// Permanent local storage under the Morphix root (default /home/jd/Morphix).
+// Permanent local storage under the Morphix root ($MORPHIX_ROOT, default ~/Morphix).
 // Files are written atomically (temp file + rename) and never auto-deleted.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, renameSync, writeFileSync, statfsSync, existsSync, readFileSync, appendFileSync } from "node:fs";

@@ -35,13 +35,13 @@ const TRANSITIONS: Record<WorkflowState, readonly WorkflowState[]> = {
   failed: ["idea", "reviewing", "generating"],
 };
 
-/** States that touch the physical printer. Disabled until Phase 5. */
+/** States that touch the physical printer; only reachable with print controls enabled. */
 export const PRINTER_STATES: readonly WorkflowState[] = ["uploading", "ready", "printing"];
 
 export interface TransitionContext {
   /** True only when the user explicitly approved this specific print. */
   userApproved?: boolean;
-  /** True once printer control has been validated and enabled (Phase 5). */
+  /** True once printer control has been validated and enabled (docs/SAFETY.md). */
   printControlsEnabled?: boolean;
 }
 

@@ -52,7 +52,7 @@ bearer tokens, `?key=` query values) are redacted from context and causes.
 | `GUARD` | AI Print Guardian (camera and failure detection) | packages/guardian |
 | `NET` | Network and internet | packages/network |
 | `STORE` | Storage, files and database | packages/storage, packages/database |
-| `AUTH` | Sign-in (Auth0) | packages/portal |
+| `AUTH` | Sign-in | packages/portal |
 | `PORTAL` | Web portal | packages/portal |
 | `SYS` | System and app | apps/desktop |
 
@@ -93,7 +93,7 @@ bearer tokens, `?key=` query values) are redacted from context and causes.
 | `MX-SLICE-001` | The printer helper program is missing | Ask a grown-up to install PrusaSlicer. | No slicer found: PrusaSlicer/OrcaSlicer are not on PATH and MORPHIX_PRUSA_SLICER/MORPHIX_ORCA_SLICER are unset. Install with `sudo apt install prusa-slicer`. | error | no |
 | `MX-SLICE-002` | The printer settings are missing | Ask a grown-up to reinstall Morphix. | config/slicer-profiles was not found (pass profilesDir or set MORPHIX_SLICER_PROFILES). | error | no |
 | `MX-SLICE-003` | Getting the model ready didn't work | Try again. If it fails again, try a simpler model. | The slicer exited with a non-zero code and produced no G-code (log tail in context). | error | yes |
-| `MX-SLICE-004` | Getting ready took too long | Try a smaller model or try again. | The slicer was killed after the slicing timeout (default 15 minutes on a Pi 4). | warning | yes |
+| `MX-SLICE-004` | Getting ready took too long | Try a smaller model or try again. | The slicer was killed after the slicing timeout (default 15 minutes). | warning | yes |
 | `MX-SLICE-005` | The printer file wasn't made | Try again. | The slicer exited without writing any G-code to the output directory. | error | yes |
 | `MX-SLICE-006` | That's too big for the printer | Make it smaller and try again. | The model exceeds the build volume (220 x 220 x 220 mm, UNVERIFIED) after scaling and orientation. | warning | no |
 | `MX-SLICE-007` | This model can't be printed | Try making the model again. | The mesh has no triangles, non-finite coordinates or zero volume (validation report not printable). | error | no |
@@ -142,7 +142,7 @@ bearer tokens, `?key=` query values) are redacted from context and causes.
 | `MX-NET-003` | The internet is too slow right now | Try again in a moment. | A network request timed out (ETIMEDOUT/UND_ERR_CONNECT_TIMEOUT/AbortSignal.timeout). | warning | yes |
 | `MX-NET-004` | Wi-Fi isn't connected | Pick a Wi-Fi network in Settings. | NetworkManager reports no active Wi-Fi connection. | error | yes |
 | `MX-NET-005` | A helper website is having trouble | Try again in a few minutes. | A cloud service answered with HTTP 5xx. | warning | yes |
-| `MX-NET-006` | The connection isn't safe | Check the date and time on the Pi, then try again. | TLS failure (certificate expired/invalid, often caused by a wrong system clock). | error | yes |
+| `MX-NET-006` | The connection isn't safe | Check the date and time on the Morphix machine, then try again. | TLS failure (certificate expired/invalid, often caused by a wrong system clock). | error | yes |
 
 ## STORE: Storage, files and database
 
@@ -152,19 +152,19 @@ bearer tokens, `?key=` query values) are redacted from context and causes.
 | `MX-STORE-002` | I can't find that file | Try making or downloading it again. | File or directory not found (ENOENT). | error | no |
 | `MX-STORE-003` | I'm not allowed to open that file | Ask a grown-up to check the Morphix folder permissions. | Permission denied (EACCES/EPERM). | error | no |
 | `MX-STORE-004` | My memory book has a problem | Restart Morphix. If it keeps happening, ask a grown-up. | The SQLite database failed to open, read or write (corrupt file or SQL error). | **critical** | no |
-| `MX-STORE-005` | I can't save anything right now | Restart the Pi. If it keeps happening, the SD card may be worn out. | The file system is read-only (EROFS). | **critical** | no |
+| `MX-STORE-005` | I can't save anything right now | Restart the Morphix machine. If it keeps happening, its disk or SD card may be failing. | The file system is read-only (EROFS). | **critical** | no |
 
-## AUTH: Sign-in (Auth0)
+## AUTH: Sign-in
 
 | Code | Title (shown to users) | What to try | Technical description | Severity | Retry |
 | --- | --- | --- | --- | --- | --- |
-| `MX-AUTH-001` | Signing in didn't work | Try signing in again. | The Auth0 login flow failed (callback error, invalid_grant, or token exchange failed). | error | yes |
+| `MX-AUTH-001` | Signing in didn't work | Try signing in again. | The sign-in flow failed (callback error, invalid_grant, or token exchange failed). | error | yes |
 | `MX-AUTH-002` | You've been signed out | Sign in again. | The session or access token expired or is invalid (login_required, jwt expired). | info | no |
-| `MX-AUTH-003` | You're not allowed to do that | Ask the owner of this Morphix to give you access. | Auth0 or Morphix denied access (access_denied, HTTP 403, missing role or not on the allow list). | warning | no |
-| `MX-AUTH-004` | Sign-in isn't set up | Ask a grown-up to set up sign-in in Settings. | Auth0 domain, client ID or secret is not configured. | error | no |
-| `MX-AUTH-005` | The sign-in service isn't answering | Check the internet and try again. | Auth0 could not be reached (network error or HTTP 5xx from the tenant). | error | yes |
+| `MX-AUTH-003` | You're not allowed to do that | Ask the owner of this Morphix to give you access. | The sign-in provider or Morphix denied access (access_denied, HTTP 403, missing role or not on the allow list). | warning | no |
+| `MX-AUTH-004` | Sign-in isn't set up | Ask a grown-up to set up sign-in in Settings. | Sign-in is not configured (no admin password or identity provider settings). | error | no |
+| `MX-AUTH-005` | The sign-in service isn't answering | Check the internet and try again. | The sign-in provider could not be reached (network error or HTTP 5xx). | error | yes |
 | `MX-AUTH-006` | Sign-in got mixed up | Close this page and sign in again. | OAuth state or nonce mismatch, or a reused callback (possible CSRF or stale tab). | warning | no |
-| `MX-AUTH-007` | Please check your email first | Open the email we sent you and tap the link. | The Auth0 account email is not verified. | info | no |
+| `MX-AUTH-007` | Please check your email first | Open the email we sent you and tap the link. | The account email is not verified by the identity provider. | info | no |
 
 ## PORTAL: Web portal
 

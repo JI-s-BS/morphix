@@ -109,7 +109,7 @@ export function overallAxisOf(label: string): Axis | null {
 
 /**
  * Removes EXIF/XMP (APP1), IPTC (APP13) and comment segments from a JPEG so no
- * location or camera data leaves the Pi. ICC (APP2) and Adobe (APP14) are kept
+ * location or camera data leaves this machine. ICC (APP2) and Adobe (APP14) are kept
  * because they affect colours. Anything that is not a well-formed JPEG is
  * returned unchanged (PNG/WebP from the phone are canvas output without EXIF).
  */

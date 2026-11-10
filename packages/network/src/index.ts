@@ -1,4 +1,4 @@
-// Wi-Fi management through NetworkManager's nmcli (jd is allowed by polkit).
+// Wi-Fi management through NetworkManager's nmcli (the app's user must be allowed by polkit).
 // Arguments go straight to execFile (no shell). Passwords are never logged.
 // The printer's Ethernet link (printer-lan) is shown read-only and never modified.
 import { execFile } from "node:child_process";

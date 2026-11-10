@@ -131,7 +131,7 @@ export interface SmartSearchOptions {
   thingiverseToken?: string;
   fetch?: typeof fetch;
   onChange?: (s: SmartSearchState) => void;
-  /** Keep a copy of a result image on the Pi; returns a URL the touchscreen can show. */
+  /** Keep a local copy of a result image; returns a URL the UI can show. */
   saveImage?: (resultId: string, bytes: Buffer, contentType: string) => string | null;
   /** QR code (data URL) for a source page, to open it on a phone. */
   qrFor?: (url: string) => Promise<string | null>;

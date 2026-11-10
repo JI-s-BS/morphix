@@ -3,9 +3,10 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GeminiLive, MORPHIX_TOOLS, isAffirmative, toMillimetres } from "@morphix/gemini";
-import { MeshyClient, MeshyGenerator, buildShape, toBinaryStl, type ModelGenerator } from "@morphix/meshy";
+import { MeshyClient, MeshyGenerator, type ModelGenerator } from "@morphix/meshy";
+import { box } from "./phase3-fixtures";
 import { parseWifiList, splitTerse, NetworkManager } from "@morphix/network";
-import { scaledCheck, stlSize } from "@morphix/slicing";
+import { scaledCheck, stlSize, writeBinaryStl } from "@morphix/slicing";
 import { Storage, Logger } from "@morphix/storage";
 import { MorphixDb } from "@morphix/database";
 import { Generation } from "../apps/desktop/electron/generation";
@@ -56,7 +57,7 @@ describe("network (nmcli parsing)", () => {
 
 describe("Meshy client", () => {
   it("creates a preview, polls progress and downloads the files", async () => {
-    const stl = toBinaryStl(buildShape("vase"));
+    const stl = writeBinaryStl(box(60, 60, 80));
     let polls = 0;
     const requests: { url: string; body?: unknown }[] = [];
     const fakeFetch = (async (url: string, init?: RequestInit) => {
@@ -98,7 +99,7 @@ describe("Meshy client", () => {
 
 describe("STL sizing", () => {
   it("measures and scales", () => {
-    const size = stlSize(toBinaryStl(buildShape("vase")))!;
+    const size = stlSize(writeBinaryStl(box(60, 60, 80)))!;
     expect(size.z).toBeCloseTo(80, 0);
     const check = scaledCheck(size, 152.4);
     expect(check.size.z).toBeCloseTo(152.4, 1);
@@ -119,7 +120,7 @@ describe("cost policy", () => {
       name: usingMeshy ? "meshy" : "demo",
       generate: () =>
         new Promise((res) => {
-          resolveGen = () => res({ format: "stl", data: toBinaryStl(buildShape("gear")), remoteId: "r1", credits: 20 });
+          resolveGen = () => res({ format: "stl", data: writeBinaryStl(box(40, 40, 10)), remoteId: "r1", credits: 20 });
         }),
     };
     const generation = new Generation(ctx, () => gen, () => {});

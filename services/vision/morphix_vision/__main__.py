@@ -12,7 +12,7 @@ from .analysis import parse_roi
 from .detector import DetectorConfig
 from .worker import Worker, http_fetch, replay_fetcher
 
-DEFAULT_URL = "http://192.168.10.51:8080/?action=snapshot"
+DEFAULT_URL = "http://localhost:8080/?action=snapshot"
 
 
 def build_parser() -> argparse.ArgumentParser:

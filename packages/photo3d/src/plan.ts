@@ -170,7 +170,7 @@ export function routeOptions(recommended: PhotoRoute, deps: Pick<PlanDeps, "mesh
     available: deps.meshy.available && !overBudget,
     credits,
     ...(!deps.meshy.available
-      ? { unavailableReason: "Meshy is not set up on the Pi (MESHY_API_KEY)." }
+      ? { unavailableReason: "Meshy is not set up (MESHY_API_KEY)." }
       : overBudget
         ? { unavailableReason: `Uses ${credits} credits; the limit is ${deps.meshy.maxCredits}.` }
         : {}),
@@ -301,7 +301,7 @@ export function planView(plan: PhotoPlan): PhotoPlanView {
 
 // ------------------------------------------------------------------ store
 
-/** Plans live in memory on the Pi for a short while (photos are not written to disk). */
+/** Plans live in memory on the server for a short while (photos are not written to disk). */
 export class PhotoPlanStore {
   private plans = new Map<string, PhotoPlan>();
   constructor(private o: { ttlMs?: number; max?: number; now?: () => number } = {}) {}
