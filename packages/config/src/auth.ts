@@ -398,7 +398,7 @@ export function createAuth(store: ConfigStore, opts: AuthOptions = {}): Auth {
  * signs that admin out everywhere. With no admin account it creates "admin". The caller prints the
  * password once on the console; it is never logged or stored in clear text.
  */
-export async function resetAdmin(store: ConfigStore, opts: { name?: string; password?: string } = {}): Promise<{ name: string; password: string; created: boolean; generated: boolean }> {
+export async function resetAdminAccount(store: ConfigStore, opts: { name?: string; password?: string } = {}): Promise<{ name: string; password: string; created: boolean; generated: boolean }> {
   if (opts.name !== undefined) {
     const p = checkUsername(opts.name);
     if (p) throw new InputError(p, "name");
@@ -431,6 +431,16 @@ export async function resetAdmin(store: ConfigStore, opts: { name?: string; pass
     list.push({ name, role: "admin", hash, pwVersion: 1, createdAt: new Date().toISOString(), ...(generated ? { mustChangePassword: true } : {}) });
     return { users: list, result: { name, password, created: true, generated } };
   });
+}
+
+/** `server.cjs reset-admin`: the text the CLI prints (once, to the terminal; never logged). */
+export async function resetAdmin(store: ConfigStore, opts: { name?: string; password?: string } = {}): Promise<string> {
+  const r = await resetAdminAccount(store, opts);
+  return [
+    `${r.created ? "Created the admin account" : "Reset the password of"} "${r.name}".`,
+    r.generated ? `New password: ${r.password}` : "The password you chose is set.",
+    r.generated ? "Sign in with it; Morphix will ask you to pick your own. Everyone signed in as this admin was signed out." : "Everyone signed in as this admin was signed out.",
+  ].join("\n");
 }
 
 // ------------------------------------------------------------------ routes ---

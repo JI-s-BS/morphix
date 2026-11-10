@@ -2,7 +2,7 @@
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createAuth, createConfigStore, hashPassword, resetAdmin, verifyPassword, type Auth } from "@morphix/config";
+import { createAuth, createAuthProvider, createConfigStore, createSetupRoutes, hashPassword, resetAdmin, resetAdminAccount, verifyPassword, type Auth } from "@morphix/config";
 import { TestRouter, cookieFrom, fakeReq, tempDir } from "./setup-helpers";
 
 let t: ReturnType<typeof tempDir>;
@@ -174,7 +174,7 @@ describe("reset-admin (CLI recovery)", () => {
     const server = createAuth(store(), { now });
     await server.createAdmin("owner", "forgotten-pass");
     const old = await loginOk(server, "owner", "forgotten-pass");
-    const r = await resetAdmin(store()); // as a separate process would
+    const r = await resetAdminAccount(store()); // as a separate process would
     expect(r).toMatchObject({ name: "owner", created: false, generated: true });
     expect(r.password.length).toBeGreaterThanOrEqual(16);
     expect(await server.userFor(reqWith(old.token))).toBeNull();
@@ -193,7 +193,7 @@ describe("reset-admin (CLI recovery)", () => {
     expect(await auth.setupOpen()).toBe(false); // unreadable: stays closed instead of letting anyone claim admin
     expect(await auth.setupOpen()).toBe(false); // ...every time, not just the first
     await expect(auth.createAdmin("intruder", "longpassword")).rejects.toThrow();
-    const r = await resetAdmin(s, { password: "chosen-password" });
+    const r = await resetAdminAccount(s, { password: "chosen-password" });
     expect(r).toMatchObject({ name: "admin", created: true, generated: false });
     expect((await auth.login("admin", "chosen-password")).ok).toBe(true);
     expect(readdirSync(join(t.dir, "secrets")).some((f) => f.startsWith("users.json.corrupt-"))).toBe(true);
@@ -250,5 +250,25 @@ describe("routes and cookies", () => {
     expect((await router.request("GET", "/api/auth/me", { cookie: cookieFrom(pw) })).body.user).toEqual({ name: "kid", role: "user" });
     const users = await router.request("GET", "/api/auth/users", { cookie: admin });
     expect(JSON.stringify(users.body)).not.toMatch(/hash|scrypt/);
+  });
+});
+
+describe("server-facing exports", () => {
+  it("resetAdmin returns the text the CLI prints", async () => {
+    const text = await resetAdmin(store());
+    expect(text).toMatch(/^Created the admin account "admin"\.\nNew password: [A-Za-z0-9_-]{16}\n/);
+    const pw = /New password: (\S+)/.exec(text)![1];
+    expect((await createAuth(store()).login("admin", pw)).ok).toBe(true);
+  });
+
+  it("createAuthProvider + createSetupRoutes mount the auth and setup routes", async () => {
+    const s = store();
+    const auth = createAuthProvider(s);
+    const router = new TestRouter(auth);
+    const mods = createSetupRoutes({ store: s, auth, csrfToken: () => "x" });
+    expect(mods).toHaveLength(2);
+    mods.forEach((m) => m(router));
+    const c = cookieFrom(await router.request("POST", "/api/auth/setup", { body: { name: "owner", password: "longpassword" } }));
+    expect((await router.request("GET", "/api/setup/keys", { cookie: c })).status).toBe(200);
   });
 });

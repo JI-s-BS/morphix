@@ -14,7 +14,7 @@ Branch `claude/op-setup-716238`. Contracts in `packages/config/src/types.ts` are
 | `packages/config/src/fsutil.ts` | Atomic write (temp file, fsync, rename), private dirs, move-aside |
 | `apps/desktop/src/pages/setup/` | `SetupGate` (wizard / sign-in / app), `SystemSetup` (Settings tab), shared panels, `setup.css` |
 | `apps/desktop/src/pages/Settings.tsx` | New "System setup" tab |
-| `tests/setup-{store,auth,routes}.test.ts` | 49 tests; `tests/setup-helpers.ts` has a small in-test Router |
+| `tests/setup-{store,auth,routes}.test.ts` | 51 tests; `tests/setup-helpers.ts` has a small in-test Router |
 
 ## Files in the data dir
 
@@ -49,7 +49,7 @@ $MORPHIX_DATA_DIR/                 created 0700 if missing (existing dirs are le
 
 ### Recovery: `server.cjs reset-admin`
 
-`resetAdmin(store, { name?, password? })` returns `{ name, password, created, generated }`:
+`resetAdminAccount(store, { name?, password? })` returns `{ name, password, created, generated }`. `resetAdmin(store)` wraps it and returns the text the CLI prints (including the new password).
 
 - It sets a new password for the first admin, or for `name`, which is then made admin. If there is no admin at all, it creates one named "admin".
 - With no `password`, it generates a 16-character password and flags the account `mustChangePassword`. After signing in, the UI asks for a new password before anything else.
@@ -62,7 +62,7 @@ The server session wires the CLI:
 node apps/server/dist/server.cjs reset-admin            # prints a one-time password
 ```
 
-It should print `password` once to the terminal (stdout) and never log it.
+The server prints the string `resetAdmin` returns once to the terminal (stdout) and never logs it.
 
 ## Routes (all JSON; the server enforces CSRF on non-GET)
 
@@ -111,14 +111,17 @@ Each handler also re-checks its `Access` itself (`guarded()`), so a server routi
 
 ## What the server session needs to do (integration)
 
+The server looks these names up (agreed with the server session):
+
 ```ts
-import { createConfigStore, createAuth, setupRoutes, resetAdmin, allowed } from "@morphix/config";
-const store = createConfigStore(dataDir);               // MORPHIX_DATA_DIR
-const auth = createAuth(store);                          // AuthProvider for every request
-auth.routes(router);                                     // /api/auth/*
-setupRoutes({ store, auth, issues: store.issues /*, slicerAdapters: ADAPTERS */ })(router);
-// access check per route: await allowed(access, await auth.userFor(req), auth.setupOpen)
+import * as config from "@morphix/config";
+const store = config.createConfigStore(dataDir);                 // MORPHIX_DATA_DIR
+const auth = config.createAuthProvider(store);                   // = createAuth(store); also carries .routes
+for (const m of config.createSetupRoutes({ store, auth, csrfToken })) m(router);   // [/api/auth/*, /api/setup/*]
+// node server.cjs reset-admin: console.log(await config.resetAdmin(store))
 ```
+
+`createSetupRoutes` also takes the optional `SetupDeps` (`slicerAdapters`, `catalog`, `drivers`, timeouts). `csrfToken` is accepted and not used: CSRF is checked by the server. The lower-level `createAuth` / `setupRoutes` / `allowed()` stay exported.
 
 1. Implement CSRF: a readable cookie `morphix_csrf` plus `GET /api/session` → `{ csrf }`, and check `X-Morphix-CSRF` on non-GET requests. The UI reads the cookie first, then falls back to `/api/session`. This module does not implement `/api/session`, so there is no route clash.
 2. Wrap the app in `<SetupGate>` in `main.tsx` / `App.tsx` (server-owned files): `createRoot(...).render(<SetupGate><App/></SetupGate>)`.
