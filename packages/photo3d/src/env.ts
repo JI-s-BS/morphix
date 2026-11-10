@@ -1,4 +1,4 @@
-// Builds pipeline dependencies from the Morphix environment (~/Morphix/config/morphix.env).
+// Builds pipeline dependencies from the Morphix environment (process.env / the config store).
 import { geminiJsonFromEnv } from "./gemini";
 import { meshyImageFromEnv, meshyImageModelFromEnv } from "./meshy-image";
 import type { PhotoToModelDeps } from "./pipeline";

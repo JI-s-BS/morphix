@@ -1,5 +1,5 @@
-// Self-healing ("eternal Morphix") types. Plain data so records can cross IPC and be shown
-// in the Grown-ups log. Nothing here talks to hardware: every fix is an injected function.
+// Self-healing types. Plain data so records can cross IPC and be shown
+// in the log. Nothing here talks to hardware: every fix is an injected function.
 
 /** What went wrong (one class per known real-world failure, plus "unknown-error"). */
 export type IncidentKind =

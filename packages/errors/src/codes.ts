@@ -141,7 +141,7 @@ export const CORE_ERROR_CODES: readonly ErrorCodeEntry[] = Object.freeze([
   }),
   ...area("SYS", {
     1: ["Something went wrong", "Try again. If it keeps happening, restart Morphix.", "Unexpected error with no more specific code (see cause and context).", "error", true],
-    2: ["A setting is missing", "Ask a grown-up to check Settings.", "Required configuration is missing or invalid (morphix.env).", "error", false],
+    2: ["A setting is missing", "Ask a grown-up to check Settings.", "Required configuration is missing or invalid.", "error", false],
     3: ["I'm out of breath", "Close other things and try again, or restart Morphix.", "Out of memory (ENOMEM, heap limit or worker killed).", "critical", true],
     4: ["Stopped", "Nothing to do. You can start again any time.", "The operation was cancelled by the user or the app (AbortError).", "info", true],
     5: ["I can't do that yet", "Try something else.", "The feature is not available on this device or not implemented yet.", "info", false],

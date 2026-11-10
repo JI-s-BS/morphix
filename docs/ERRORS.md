@@ -179,7 +179,7 @@ bearer tokens, `?key=` query values) are redacted from context and causes.
 | Code | Title (shown to users) | What to try | Technical description | Severity | Retry |
 | --- | --- | --- | --- | --- | --- |
 | `MX-SYS-001` | Something went wrong | Try again. If it keeps happening, restart Morphix. | Unexpected error with no more specific code (see cause and context). | error | yes |
-| `MX-SYS-002` | A setting is missing | Ask a grown-up to check Settings. | Required configuration is missing or invalid (morphix.env). | error | no |
+| `MX-SYS-002` | A setting is missing | Ask a grown-up to check Settings. | Required configuration is missing or invalid. | error | no |
 | `MX-SYS-003` | I'm out of breath | Close other things and try again, or restart Morphix. | Out of memory (ENOMEM, heap limit or worker killed). | **critical** | yes |
 | `MX-SYS-004` | Stopped | Nothing to do. You can start again any time. | The operation was cancelled by the user or the app (AbortError). | info | yes |
 | `MX-SYS-005` | I can't do that yet | Try something else. | The feature is not available on this device or not implemented yet. | info | no |
