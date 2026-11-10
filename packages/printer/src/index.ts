@@ -114,3 +114,5 @@ export * from "./control";
 export * from "./machine";
 export * from "./tracker";
 export * from "./fake-server";
+export * from "./drivers/types";
+export * from "./drivers/registry";

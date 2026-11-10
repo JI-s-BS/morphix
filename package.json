@@ -16,6 +16,8 @@
     "start": "electron ."
   },
   "dependencies": {
+    "basic-ftp": "6.2.3",
+    "mqtt": "5.16.1",
     "pg": "8.13.1",
     "qrcode": "^1.5.4",
     "react": "18.3.1",

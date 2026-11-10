@@ -15,5 +15,5 @@
     "baseUrl": ".",
     "paths": { "@morphix/*": ["packages/*/src"] }
   },
-  "include": ["apps/desktop/electron", "apps/desktop/src", "apps/remote/src", "packages/*/src", "tests"]
+  "include": ["apps/desktop/electron", "apps/desktop/src", "apps/remote/src", "apps/server/src", "packages/*/src", "tests"]
 }

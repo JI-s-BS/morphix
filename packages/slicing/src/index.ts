@@ -78,3 +78,4 @@ export function heightForDimension(native: { x: number; y: number; z: number }, 
   return (sizeMm / along) * native.z;
 }
 export * from "./speed";
+export * from "./adapters/types";
