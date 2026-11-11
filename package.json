@@ -1,6 +1,6 @@
 {
   "name": "morphix",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Morphix: AI-powered, voice-controlled 3D printing (Phase 1 foundation)",
   "main": "apps/desktop/dist/main.cjs",
