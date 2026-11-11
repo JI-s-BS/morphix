@@ -1,21 +1,26 @@
-// preparePrint: the single entry point for the Electron main process.
-// Load -> validate -> repair -> scale -> orient -> place -> fit check -> slice -> .gx.
-// It never touches the network or the printer; the only process it may start is a
-// locally installed slicer (execFile, no shell).
+// preparePrint: the single entry point for the server / Electron main process.
+// Load -> validate -> repair -> scale -> orient -> place -> fit check -> slice -> printable file
+// (.gcode, .gx or .gcode.3mf, whatever the printer takes). It never touches the network or
+// the printer; the only process it may start is a locally installed slicer (execFile, no shell).
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
+import type { PrinterModel } from "@morphix/catalog";
+import { detectAll, pickSlicer, SLICERS, unsupportedReason, type PickResult } from "./adapters";
+import type { DetectOptions } from "./adapters/detect";
+import type { SlicerId, SlicerInstall } from "./adapters/types";
+import { defaultPrinter, printableVolume } from "./adapters/profile";
 import { isGlb, parseGlb } from "./glb";
-import { analyzeGcode, capFirstLayers, type GcodeEstimates } from "./gcode";
+import type { GcodeEstimates } from "./gcode";
 import type { FilamentId } from "./filaments";
-import { applyLeveling, levelingPlan, type LevelingPlan, type LevelingReport } from "./leveling";
-import { GX_LAYOUT_VERIFIED, validateGx, writeGx, type GxValidation } from "./gx";
+import type { LevelingPlan, LevelingReport } from "./leveling";
+import type { GX_LAYOUT_VERIFIED, GxValidation } from "./gx";
 import { computeBounds, type Mesh, type Vec3 } from "./mesh";
-import { applyOrientation, autoOrient, checkFit, DEFAULT_BUILD_VOLUME, placeOnPlate, scaleToHeight, type BuildVolume, type BuildVolumeResult, type OrientationResult } from "./place";
+import { applyOrientation, autoOrient, checkFit, placeOnPlate, scaleToHeight, type BuildVolume, type BuildVolumeResult, type OrientationResult } from "./place";
 import { QD330_PLA_DEFAULTS } from "./profiles";
 import { repairMesh, type RepairOptions, type RepairSummary } from "./repair";
-import { sliceStl, type DetectOptions, type ExecFileFn, type SlicerInfo, type SliceResult, type SupportMode } from "./slicer";
+import { toSlicerInfo, toSlicerInstall, type ExecFileFn, type SlicerInfo, type SliceResult, type SupportMode } from "./slicer";
 import { MeshFormatError, parseStl, writeBinaryStl } from "./stl";
 import { gxThumbnailBmp } from "./thumbnail";
 import { detectUpAxis, normalizeUpAxis, type UpAxisDetection } from "./upaxis";
@@ -25,7 +30,11 @@ export type MeshFormat = "stl" | "glb";
 
 export type PrepareStage = "load" | "validate" | "repair" | "place" | "slice" | "gx" | "done";
 
+export { gxFromGcode } from "./adapters/output";
+
 export interface PreparePrintOptions {
+  /** Catalog printer to prepare for. Default: the Afinia QD330 (Morphix's original printer). */
+  printer?: PrinterModel;
   /** Default true. */
   repair?: boolean | RepairOptions;
   /** "auto" (default) picks a stable lay-flat rotation; "keep" uses the model as given. */
@@ -37,6 +46,7 @@ export interface PreparePrintOptions {
   brimWidthMm?: number;
   /** Perimeters (walls). Omitted: the slicer profile's value. */
   perimeters?: number;
+  /** Default: the printer's bed (a round bed's inscribed square). */
   buildVolume?: BuildVolume;
   /** For GLB: glTF unit -> mm factor before height scaling (default 1000). */
   glbUnitScaleMm?: number;
@@ -50,10 +60,17 @@ export interface PreparePrintOptions {
   referenceGlb?: string | Uint8Array;
   /** false = stop after the mesh stages (no slicer is run). Default true. */
   slice?: boolean;
-  /** Use this slicer, or "none" to skip detection. Default: auto-detect. */
-  slicer?: SlicerInfo | "none";
+  /** Use this slicer, or "none" to skip detection. Default: detect, then pickSlicer(). */
+  slicer?: SlicerInfo | SlicerInstall | "none";
+  /** Preferred slicer when several are installed (MorphixConfig.slicer.preferred). */
+  preferredSlicer?: SlicerId;
+  /** Custom executable per slicer (MorphixConfig.slicer.paths). */
+  slicerPaths?: Partial<Record<SlicerId, string>>;
+  /** false = ignore the catalog's vendorProfiles and use Morphix's generated profile. Default true. */
+  useVendorProfile?: boolean;
+  /** @deprecated ignored: profiles are generated from the printer catalog (adapters/profile.ts). */
   profilesDir?: string;
-  /** Where to write model.stl / model.gcode / model.gx / thumbnail.bmp. Default: temp dir. */
+  /** Where to write model.stl / model.gcode / model.gx|.gcode.3mf / thumbnail.bmp. Default: temp dir. */
   outputDir?: string;
   /** Base file name for outputs (default "model"). */
   baseName?: string;
@@ -65,8 +82,9 @@ export interface PreparePrintOptions {
   /** Nozzle height above the bed for this slice (mm). Omitted: the profile's z_offset. */
   zOffsetMm?: number;
   /**
-   * How the bed is levelled before the print (see leveling.ts). Default "gcode": G29 (UNVERIFIED)
-   * is written into the start G-code of every print; "printer" leaves it to the QD330's own routine.
+   * How the bed is levelled before the print (see leveling.ts). Default: the catalog's
+   * autoLevel command (G29 for the QD330, UNVERIFIED) written into the start G-code of every
+   * print; "printer" leaves it to the printer's own routine. Plain G-code printers only.
    */
   leveling?: LevelingPlan;
   /** Injected process runner (tests). */
@@ -100,8 +118,10 @@ export interface PrintEstimates {
 }
 
 export interface PreparePrintResult {
-  /** True when a .gx was produced. It is still UNVERIFIED and must not be sent to the printer yet. */
+  /** True when the printable file was produced (a .gx also validated). Still UNVERIFIED until printed. */
   ok: boolean;
+  /** Catalog id of the printer this was prepared for. */
+  printerId: string;
   format: MeshFormat;
   /** How the source up axis was decided (the mesh is always converted to Z-up). */
   upAxis: UpAxisDetection;
@@ -119,11 +139,15 @@ export interface PreparePrintResult {
   slicer: SliceResult | NotProduced;
   /** Slicer G-code analysis (estimates), when sliced. */
   gcode: { path: string; estimates: GcodeEstimates } | null;
-  /** How the bed gets levelled for this print (null when not sliced). */
+  /** How the bed gets levelled for this print (null when not sliced or not post-processed). */
   leveling: LevelingReport | null;
+  /** FlashForge .gx (only for printers whose fileFormat is "gx"). */
   gx: { ok: true; buffer: Buffer; validation: GxValidation; verified: typeof GX_LAYOUT_VERIFIED } | NotProduced;
+  /** The file to send to the printer, in printer.fileFormat. */
+  printable: { ok: true; path: string; format: PrinterModel["fileFormat"] } | NotProduced;
   estimates: PrintEstimates;
-  files: { dir: string; stl: string; thumbnail: string; gcode?: string; gx?: string };
+  /** gcode: plain G-code for the preview (post-processed for plain printers, extracted from a .gcode.3mf). */
+  files: { dir: string; stl: string; thumbnail: string; gcode?: string; gx?: string; printable?: string };
   warnings: string[];
 }
 
@@ -178,7 +202,8 @@ export async function loadMesh(
 export async function preparePrint(input: PreparePrintInput): Promise<PreparePrintResult> {
   const o = input.options ?? {};
   const progress = (s: PrepareStage) => o.onProgress?.(s);
-  const volume = o.buildVolume ?? DEFAULT_BUILD_VOLUME;
+  const printer = o.printer ?? defaultPrinter();
+  const volume = o.buildVolume ?? printableVolume(printer);
 
   progress("load");
   const loaded = await loadMesh(input, o);
@@ -223,6 +248,7 @@ export async function preparePrint(input: PreparePrintInput): Promise<PreparePri
 
   const result: PreparePrintResult = {
     ok: false,
+    printerId: printer.id,
     format: loaded.format,
     upAxis: loaded.upAxis,
     report: { input: inputReport, final: finalReport },
@@ -237,6 +263,7 @@ export async function preparePrint(input: PreparePrintInput): Promise<PreparePri
     gcode: null,
     leveling: null,
     gx: { ok: false, reason: "not-sliced", message: "no G-code to wrap" },
+    printable: { ok: false, reason: "not-sliced", message: "slicing not attempted" },
     estimates: heuristicEstimates(finalReport),
     files,
     warnings,
@@ -245,78 +272,99 @@ export async function preparePrint(input: PreparePrintInput): Promise<PreparePri
   if (!fits.fits) {
     result.slicer = { ok: false, reason: "too-large", message: fits.message };
     result.gx = { ok: false, reason: "too-large", message: fits.message };
+    result.printable = { ok: false, reason: "too-large", message: fits.message };
     progress("done");
     return result;
   }
   if (o.slice === false || o.slicer === "none") {
     result.slicer = { ok: false, reason: "skipped", message: "slicing disabled by options" };
+    result.printable = { ok: false, reason: "skipped", message: "slicing disabled by options" };
     progress("done");
     return result;
   }
 
   progress("slice");
-  const sliced = await sliceStl({
-    stlPath: files.stl,
-    outDir: join(dir, "slice"),
-    slicer: o.slicer,
-    supports: o.supports,
-    layerHeightMm: o.layerHeightMm,
-    infillPercent: o.infillPercent,
-    brimWidthMm: o.brimWidthMm,
-    perimeters: o.perimeters,
-    centerMm: { x: 0, y: 0 }, // QD330 bed is centre-origin (-110..110)
-    filament: o.filament,
-    speedMmS: o.speedMmS,
-    zOffsetMm: o.zOffsetMm,
-    profilesDir: o.profilesDir,
-    timeoutMs: o.sliceTimeoutMs,
-    exec: o.exec,
-    detect: o.detect,
-  });
-  result.slicer = sliced;
-  if (!sliced.ok) {
-    result.gx = { ok: false, reason: sliced.reason, message: sliced.message };
+  const fail = (reason: string, message: string) => {
+    result.gx = { ok: false, reason, message };
+    result.printable = { ok: false, reason, message };
     progress("done");
     return result;
+  };
+  const chosen = await chooseSlicer(printer, o);
+  if (!chosen.ok) {
+    result.slicer = { ok: false, reason: chosen.reason, message: chosen.message };
+    return fail(chosen.reason, chosen.message);
   }
-  files.gcode = join(dir, `${base}.gcode`);
-  const levelled = applyLeveling(sliced.gcode, o.leveling ?? levelingPlan());
-  result.leveling = levelled.report;
-  warnings.push(...levelled.report.warnings);
-  if (levelled.report.mode === "gcode") warnings.push(`bed leveling uses an UNVERIFIED command (${levelled.report.commands.join("; ")}): checklist L1 in docs/PHASE5.md`);
-  // Layer 1 at most 20 mm/s, layer 2 at most 30, travel in both at most 100 mm/s, whatever speed was chosen.
-  const gcodeText = capFirstLayers(levelled.gcode);
-  await writeFile(files.gcode, gcodeText);
+  warnings.push(...chosen.warnings);
+  const sliced = await chosen.adapter.slice(
+    chosen.install,
+    {
+      modelPath: files.stl,
+      outDir: join(dir, "slice"),
+      printableDir: dir,
+      baseName: base,
+      printer,
+      filament: o.filament ?? "pla",
+      layerHeightMm: o.layerHeightMm,
+      infillPercent: o.infillPercent,
+      supports: o.supports,
+      brimWidthMm: o.brimWidthMm,
+      perimeters: o.perimeters,
+      speedMmS: o.speedMmS,
+      zOffsetMm: o.zOffsetMm,
+      timeoutMs: o.sliceTimeoutMs,
+      leveling: o.leveling,
+      thumbnailBmp,
+      useVendorProfile: o.useVendorProfile,
+    },
+    { exec: o.exec },
+  );
+  const info = toSlicerInfo(chosen.install);
+  if (!sliced.ok) {
+    result.slicer = { ok: false, reason: sliced.reason, message: sliced.message, slicer: info, args: sliced.args, log: sliced.log };
+    return fail(sliced.reason, sliced.message);
+  }
   const est = sliced.estimates;
-  result.gcode = { path: files.gcode, estimates: est };
-  result.estimates = { printTimeS: est.printTimeS, filamentMm: est.filamentMm, filamentG: est.filamentG, layerCount: est.layerCount, source: "slicer" };
-
-  progress("gx");
-  const gx = gxFromGcode(gcodeText, thumbnailBmp, est, o.layerHeightMm, o.perimeters);
-  const validation = validateGx(gx);
-  files.gx = join(dir, `${base}.gx`);
-  await writeFile(files.gx, gx);
-  result.gx = { ok: true, buffer: gx, validation, verified: GX_LAYOUT_VERIFIED };
-  result.ok = validation.ok;
-  if (!validation.ok) warnings.push(`.gx validation failed: ${validation.errors.join("; ")}`);
-  warnings.push(".gx layout is UNVERIFIED against official Afinia output: do not send to the printer until compared (docs/PHASE3.md)");
+  result.slicer = {
+    ok: true, slicer: info, gcodePath: sliced.rawGcodePath ?? "", gcode: sliced.rawGcode ?? "", estimates: est ?? emptyEstimates(),
+    args: sliced.args, durationMs: sliced.durationMs, profileVerified: false, log: sliced.log,
+  };
+  result.leveling = sliced.leveling;
+  warnings.push(...sliced.warnings);
+  if (sliced.gcodePath) {
+    files.gcode = sliced.gcodePath;
+    if (est) result.gcode = { path: sliced.gcodePath, estimates: est };
+  }
+  if (est) result.estimates = { printTimeS: est.printTimeS, filamentMm: est.filamentMm, filamentG: est.filamentG, layerCount: est.layerCount, source: "slicer" };
+  files.printable = sliced.printablePath;
+  result.printable = { ok: true, path: sliced.printablePath, format: sliced.format };
+  if (sliced.gx) {
+    progress("gx");
+    files.gx = sliced.printablePath;
+    result.gx = { ok: true, buffer: sliced.gx.buffer, validation: sliced.gx.validation, verified: sliced.gx.verified };
+    result.ok = sliced.gx.validation.ok;
+  } else {
+    result.gx = { ok: false, reason: "not-gx", message: `the ${printer.brand} ${printer.model} takes .${sliced.format} files, not .gx` };
+    result.ok = true;
+  }
   progress("done");
   return result;
 }
 
-/** Wraps slicer G-code in a .gx using values read from the G-code (or the QD330 defaults). */
-export function gxFromGcode(gcode: string, thumbnailBmp: Uint8Array, est: GcodeEstimates = analyzeGcode(gcode), layerHeightMm?: number, shells?: number): Buffer {
-  return writeGx({
-    gcode,
-    thumbnailBmp,
-    printTimeS: est.printTimeS ?? 0,
-    filamentMm: est.filamentMm ?? 0,
-    layerHeightMm: layerHeightMm ?? est.layerHeightMm ?? QD330_PLA_DEFAULTS.layerHeightMm,
-    shells: shells ?? QD330_PLA_DEFAULTS.perimeters,
-    printSpeedMmS: QD330_PLA_DEFAULTS.printSpeedMmS,
-    bedTempC: est.bedTempC ?? QD330_PLA_DEFAULTS.bedTempC,
-    extruderTempC: est.nozzleTempC ?? QD330_PLA_DEFAULTS.nozzleTempC,
-  });
+/** The slicer to use: the one passed in (if it can make this printer's file), else detect + pickSlicer(). */
+async function chooseSlicer(printer: PrinterModel, o: PreparePrintOptions): Promise<PickResult> {
+  if (o.slicer && o.slicer !== "none") {
+    const install = toSlicerInstall(o.slicer);
+    const why = unsupportedReason(install.id, printer);
+    if (why) return { ok: false, reason: "unsupported-printer", message: why };
+    return { ok: true, adapter: SLICERS[install.id], install, warnings: [] };
+  }
+  const installs = await detectAll({ exec: o.exec, skipVersion: true, ...o.detect, paths: o.slicerPaths });
+  return pickSlicer(printer, installs, o.preferredSlicer);
+}
+
+function emptyEstimates(): GcodeEstimates {
+  return { printTimeS: null, filamentMm: null, filamentG: null, filamentCm3: null, layerCount: 0, layerHeightMm: null, maxZMm: 0, nozzleTempC: null, bedTempC: null, generator: null, source: { time: null, filament: null } };
 }
 
 /**

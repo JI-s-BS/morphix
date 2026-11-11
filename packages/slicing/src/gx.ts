@@ -8,7 +8,7 @@
 //   - the `xgcode` Rust crate (maugier, 2022)
 // Both agree on every offset. It has NOT been compared with a file exported by the
 // official Afinia slicer. Before any real print, run compareGxHeaders() against one of
-// the .gx files already stored on the printer (see docs/PHASE3.md).
+// the .gx files already stored on the printer (see docs/QD330.md).
 //
 // Layout (little-endian):
 //   0x00  12 B  magic "xgcode 1.0\n\0"

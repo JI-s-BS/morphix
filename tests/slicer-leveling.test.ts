@@ -12,7 +12,9 @@ import { capFirstLayers,
   parsePrusaIni,
   preparePrint,
   readGx,
-  resolveProfilePaths,
+  defaultPrinter,
+  orcaMachineJson,
+  prusaProfileIni,
   startSequence,
   validateGx,
   validateLevelCommands,
@@ -27,7 +29,7 @@ const tmp = () => mkdtemp(join(tmpdir(), "morphix-level-"));
 
 /** The profile's start G-code as PrusaSlicer would write it (placeholders filled in). */
 async function prusaStart(): Promise<string> {
-  const ini = parsePrusaIni(await readFile(resolveProfilePaths(PROFILES)!.prusaIni, "utf8"));
+  const ini = parsePrusaIni(prusaProfileIni(defaultPrinter()));
   return ini.start_gcode.replace(/\\n/g, "\n").replace(/\[first_layer_bed_temperature\]/g, "60").replace(/\[first_layer_temperature\]/g, "210");
 }
 
@@ -61,7 +63,7 @@ describe("start G-code: home, bed at temperature, level, heat nozzle, prime", ()
   });
 
   it("OrcaSlicer fallback profile has the same order and a centre-origin bed", async () => {
-    const machine = JSON.parse(await readFile(resolveProfilePaths(PROFILES)!.orcaMachine, "utf8"));
+    const machine = orcaMachineJson(defaultPrinter()) as { machine_start_gcode: string; printable_area: string[] };
     expect(startSequence(machine.machine_start_gcode).ordered).toBe(true);
     // The QD330 bed runs -110..110 (G28 parks at X/Y 110); 0..220 put models half off the bed.
     expect(machine.printable_area).toEqual(["-110x-110", "110x-110", "110x110", "-110x110"]);

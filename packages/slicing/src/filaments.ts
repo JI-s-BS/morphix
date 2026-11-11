@@ -1,9 +1,9 @@
-// Filament profiles for the QD330 (0.4 mm nozzle, 1.75 mm filament, direct drive,
-// enclosed). The generic ones are common starting values for each material, NOT tuned for a
-// specific brand: the spool's own label wins if it differs. Branded ones (brand set) use the
-// maker's published numbers. Temperatures stay inside the controller's limits
-// (nozzle 250 °C, bed 100 °C). The base printer/print profile stays in qd330-pla-0.2mm.ini;
-// these values are layered on top with a second PrusaSlicer --load.
+// Filament profiles. The generic ones are common starting values for each material, NOT tuned
+// for a specific brand: the spool's own label wins if it differs. Branded ones (brand set) use
+// the maker's published numbers. They were chosen for the QD330 (nozzle 250 °C, bed 100 °C);
+// for other printers adapters/profile.ts clamps them to the catalog model's limits. The printer
+// profile is generated per printer (adapters/profile.ts); these values are layered on top
+// with a second PrusaSlicer --load.
 //
 // Build plate: smooth PEI. Bed temperatures are the usual smooth-PEI ones for each material.
 // The part fan is off for at least the first 2 layers (the slow ones) on every filament.
@@ -125,10 +125,11 @@ export function changeTemperature(from: unknown, to: unknown): number {
 }
 
 /** PrusaSlicer config keys for this filament (layered over the base profile). */
-export function prusaFilamentConfig(f: FilamentProfile): Record<string, string | number> {
+export function prusaFilamentConfig(f: FilamentProfile, diameterMm = 1.75): Record<string, string | number> {
   return {
     filament_type: f.material === "TPU" ? "FLEX" : f.material,
     filament_settings_id: `Morphix ${f.label} (${f.brand ?? "generic"})`,
+    filament_diameter: diameterMm,
     filament_density: f.densityGcm3,
     temperature: f.nozzleC,
     first_layer_temperature: f.firstLayerNozzleC,
@@ -147,25 +148,24 @@ export function prusaFilamentConfig(f: FilamentProfile): Record<string, string |
 }
 
 /** Writes the filament overlay .ini next to the slice output and returns its path. */
-export async function writePrusaFilamentIni(dir: string, id: FilamentId): Promise<string> {
-  const f = FILAMENTS[id];
-  const lines = [`# Morphix ${f.brand ? "" : "generic "}${f.label} profile for the QD330 (generated; see packages/slicing/src/filaments.ts)`];
-  for (const [k, v] of Object.entries(prusaFilamentConfig(f))) lines.push(`${k} = ${v}`);
+export async function writePrusaFilamentIni(dir: string, id: FilamentId, f: FilamentProfile = FILAMENTS[id], diameterMm = 1.75): Promise<string> {
+  const lines = [`# Morphix ${f.brand ? "" : "generic "}${f.label} profile (generated; see packages/slicing/src/filaments.ts)`];
+  for (const [k, v] of Object.entries(prusaFilamentConfig(f, diameterMm))) lines.push(`${k} = ${v}`);
   const path = join(dir, `filament-${id}.ini`);
   await writeFile(path, lines.join("\n") + "\n");
   return path;
 }
 
-/** OrcaSlicer filament JSON (fallback slicer). */
-export function orcaFilamentJson(f: FilamentProfile): Record<string, unknown> {
+/** OrcaSlicer / Bambu Studio filament JSON. */
+export function orcaFilamentJson(f: FilamentProfile, diameterMm = 1.75): Record<string, unknown> {
   const s = (v: number) => [String(v)];
   return {
     type: "filament",
-    name: `Morphix ${f.label} QD330 (${f.brand ?? "generic"})`,
+    name: `Morphix ${f.label} (${f.brand ?? "generic"})`,
     from: "User",
     instantiation: "true",
     filament_type: [f.material],
-    filament_diameter: ["1.75"],
+    filament_diameter: s(diameterMm),
     filament_density: s(f.densityGcm3),
     nozzle_temperature: s(f.nozzleC),
     nozzle_temperature_initial_layer: s(f.firstLayerNozzleC),

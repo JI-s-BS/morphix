@@ -134,10 +134,10 @@ describe("Z offset from the print page", () => {
     expect(profileZOffset("nothing")).toBeNull();
   });
 
-  it("gives OrcaSlicer a machine profile copy with the chosen z_offset", async () => {
-    const { writeOrcaMachineWithZ } = await import("@morphix/slicing");
-    const dir = mkdtempSync(join(tmpdir(), "zorca-"));
-    const p = await writeOrcaMachineWithZ(dir, JSON.stringify({ name: "QD330", z_offset: "0.5" }), 0.25);
-    expect(JSON.parse(readFileSync(p, "utf8"))).toEqual({ name: "QD330", z_offset: "0.25" });
+  it("gives OrcaSlicer a machine profile with the chosen z_offset", async () => {
+    const { orcaMachineJson, defaultPrinter } = await import("@morphix/slicing");
+    expect(orcaMachineJson(defaultPrinter()).z_offset).toBe("-0.05");
+    expect(orcaMachineJson(defaultPrinter(), { zOffsetMm: 0.25 }).z_offset).toBe("0.25");
+    expect(orcaMachineJson(defaultPrinter(), { zOffsetMm: 9 }).z_offset).toBe("1");
   });
 });

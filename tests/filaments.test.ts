@@ -1,18 +1,19 @@
 // Generic filament profiles: limits, the PrusaSlicer overlay, and the OrcaSlicer file.
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BED_MAX_C, NOZZLE_MAX_C, sanitizeFileName } from "@morphix/printer";
 import {
-  changeTemperature, filamentChangeGcode, orcaFilamentJson, filamentJobFileName, isFilamentJobFile, validateGx, writeGx, FILAMENT_IDS, FILAMENTS, filamentProfile, parsePrusaIni, prusaFilamentConfig, sliceStl, writeBinaryStl, writePrusaFilamentIni, type SlicerInfo,
+  changeTemperature, filamentChangeGcode, orcaFilamentJson, filamentJobFileName, isFilamentJobFile, validateGx, writeGx, FILAMENT_IDS, FILAMENTS, filamentProfile, parsePrusaIni, prusaFilamentConfig, writeBinaryStl, writePrusaFilamentIni, defaultPrinter, SLICERS, toSlicerInstall, type ExecFileFn, type FilamentId, type SlicerInfo,
 } from "@morphix/slicing";
 import { box, fakeSlicerExec, ORCA_GCODE } from "./phase3-fixtures";
 
-const PROFILES = resolve(__dirname, "..", "config", "slicer-profiles");
 const PRUSA: SlicerInfo = { kind: "prusaslicer", path: "/usr/bin/prusa-slicer", version: "2.9.2" };
 const ORCA: SlicerInfo = { kind: "orcaslicer", path: "/usr/bin/orca-slicer", version: "2.2.0" };
 const tmp = () => mkdtemp(join(tmpdir(), "morphix-fil-"));
+const sliceStl = (o: { stlPath: string; outDir: string; slicer: SlicerInfo; filament: FilamentId; exec: ExecFileFn }) =>
+  SLICERS[o.slicer.kind].slice(toSlicerInstall(o.slicer), { modelPath: o.stlPath, outDir: o.outDir, printer: defaultPrinter(), filament: o.filament }, { exec: o.exec });
 
 describe("generic filament profiles", () => {
   it("cover the common materials and stay inside the printer's heater limits", () => {
@@ -49,11 +50,11 @@ describe("generic filament profiles", () => {
     const out = await tmp();
     const stl = join(out, "m.stl");
     await writeFile(stl, writeBinaryStl(box(20, 20, 20)));
-    const r = await sliceStl({ stlPath: stl, outDir: out, slicer: PRUSA, filament: "tpu", profilesDir: PROFILES, exec });
+    const r = await sliceStl({ stlPath: stl, outDir: out, slicer: PRUSA, filament: "tpu", exec });
     expect(r.ok).toBe(true);
     const args = calls[0].args;
     const loads = args.flatMap((a, i) => (a === "--load" ? [args[i + 1]] : []));
-    expect(loads).toEqual([join(PROFILES, "qd330-pla-0.2mm.ini"), join(out, "filament-tpu.ini")]);
+    expect(loads).toEqual([join(out, "printer-afinia-qd330.ini"), join(out, "filament-tpu.ini")]);
     expect(parsePrusaIni(await readFile(loads[1], "utf8")).temperature).toBe("225");
   });
 
@@ -62,7 +63,7 @@ describe("generic filament profiles", () => {
     const out = await tmp();
     const stl = join(out, "m.stl");
     await writeFile(stl, writeBinaryStl(box(20, 20, 20)));
-    await sliceStl({ stlPath: stl, outDir: out, slicer: ORCA, filament: "abs", profilesDir: PROFILES, exec });
+    await sliceStl({ stlPath: stl, outDir: out, slicer: ORCA, filament: "abs", exec });
     const args = calls[0].args;
     const json = JSON.parse(await readFile(args[args.indexOf("--load-filaments") + 1], "utf8"));
     expect(json).toMatchObject({ filament_type: ["ABS"], nozzle_temperature: ["245"], hot_plate_temp: ["100"], fan_max_speed: ["15"] });
@@ -117,18 +118,18 @@ describe("Elegoo Rapid PETG profile", () => {
     const stl = join(out, "m.stl");
     await writeFile(stl, writeBinaryStl(box(20, 20, 20)));
     const prusa = fakeSlicerExec();
-    expect((await sliceStl({ stlPath: stl, outDir: out, slicer: PRUSA, filament: "elegoo-rapid-petg", profilesDir: PROFILES, exec: prusa.exec })).ok).toBe(true);
+    expect((await sliceStl({ stlPath: stl, outDir: out, slicer: PRUSA, filament: "elegoo-rapid-petg", exec: prusa.exec })).ok).toBe(true);
     const args = prusa.calls[0].args;
     const loads = args.flatMap((a, i) => (a === "--load" ? [args[i + 1]] : []));
-    expect(loads).toEqual([join(PROFILES, "qd330-pla-0.2mm.ini"), join(out, "filament-elegoo-rapid-petg.ini")]);
+    expect(loads).toEqual([join(out, "printer-afinia-qd330.ini"), join(out, "filament-elegoo-rapid-petg.ini")]);
 
     const orca = fakeSlicerExec(ORCA_GCODE);
-    await sliceStl({ stlPath: stl, outDir: out, slicer: ORCA, filament: "elegoo-rapid-petg", profilesDir: PROFILES, exec: orca.exec });
+    await sliceStl({ stlPath: stl, outDir: out, slicer: ORCA, filament: "elegoo-rapid-petg", exec: orca.exec });
     const oargs = orca.calls[0].args;
     const json = JSON.parse(await readFile(oargs[oargs.indexOf("--load-filaments") + 1], "utf8"));
     expect(json).toEqual(orcaFilamentJson(f));
     expect(json).toMatchObject({
-      name: "Morphix Elegoo Rapid PETG QD330 (Elegoo)", filament_type: ["PETG"], filament_density: ["1.29"],
+      name: "Morphix Elegoo Rapid PETG (Elegoo)", filament_type: ["PETG"], filament_density: ["1.29"],
       nozzle_temperature: ["245"], hot_plate_temp: ["70"], hot_plate_temp_initial_layer: ["75"], fan_max_speed: ["50"], filament_max_volumetric_speed: ["8"],
     });
   });

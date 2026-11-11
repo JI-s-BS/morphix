@@ -5,9 +5,10 @@
 //   4. slicing + .gx from the prepared STL with the advised settings
 // Settings the caller passes explicitly in `options` always win over the advice.
 import { adviseSlicing, overhangStats, type AdvisorGeminiOptions, type IntendedUse, type OverhangStats, type SlicingAdvice } from "./advisor";
-import { DEFAULT_BUILD_VOLUME } from "./place";
+import { detectAll, SLICERS } from "./adapters";
+import { defaultPrinter, printableVolume } from "./adapters/profile";
 import { preparePrint, type PreparePrintInput, type PreparePrintResult, type PrepareStage } from "./prepare";
-import { detectSlicers, type SlicerInfo, type SupportMode } from "./slicer";
+import { toSlicerInfo, type SlicerInfo, type SupportMode } from "./slicer";
 import { parseStl } from "./stl";
 
 export type AdvisedPrepareStage = PrepareStage | "advise";
@@ -53,7 +54,14 @@ export async function prepareWithAdvice(input: PrepareWithAdviceInput): Promise<
   let first = await preparePrint({ ...input, options: { ...o, slice: false, onProgress: meshStages } });
 
   // 2. Advice.
-  const slicers = o.slicer && o.slicer !== "none" ? [o.slicer] : input.availableSlicers ?? (o.slicer === "none" ? [] : await detectSlicers({ exec: o.exec, skipVersion: true, ...o.detect }));
+  const printer = o.printer ?? defaultPrinter();
+  const given = o.slicer && o.slicer !== "none" ? ("id" in o.slicer ? toSlicerInfo(o.slicer) : o.slicer) : null;
+  const slicers: SlicerInfo[] = given
+    ? [given]
+    : input.availableSlicers ??
+      (o.slicer === "none"
+        ? []
+        : (await detectAll({ exec: o.exec, skipVersion: true, ...o.detect, paths: o.slicerPaths })).filter((s) => SLICERS[s.id].supports(printer)).map(toSlicerInfo));
   progress("advise");
   const advise = (r: PreparePrintResult, overhang: OverhangStats, lock?: "keep") =>
     adviseSlicing(
@@ -65,7 +73,7 @@ export async function prepareWithAdvice(input: PrepareWithAdviceInput): Promise<
         intendedUse: input.intendedUse,
         description: input.description,
         availableSlicers: slicers,
-        buildVolume: o.buildVolume ?? DEFAULT_BUILD_VOLUME,
+        buildVolume: o.buildVolume ?? printableVolume(printer),
         lockOrientation: lock ?? (o.orientation === "keep" ? "keep" : undefined),
       },
       { gemini: input.gemini },
@@ -86,7 +94,7 @@ export async function prepareWithAdvice(input: PrepareWithAdviceInput): Promise<
     overridden.push(name);
     return mine;
   };
-  const slicer = o.slicer && o.slicer !== "none" ? o.slicer : slicers.find((s) => s.kind === advice.slicer) ?? null;
+  const slicer = given ?? slicers.find((s) => s.kind === advice.slicer) ?? null;
   if (o.slicer && o.slicer !== "none") overridden.push("slicer");
   const applied: AppliedSettings = {
     slicer,
