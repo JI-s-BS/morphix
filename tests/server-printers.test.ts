@@ -84,7 +84,7 @@ describe("driver status", () => {
       throw new Error("socket hang up");
     };
     await obs.poll();
-    expect(seen).toEqual(["IDLE", "socket hang up"]);
+    expect(seen).toEqual(["READY", "socket hang up"]);
     expect(await obs.info()).toEqual({ machineType: "Voron", machineName: "garage", firmware: "Klipper 0.12", serial: undefined });
   });
 });

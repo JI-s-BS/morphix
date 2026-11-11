@@ -13,6 +13,7 @@ export const RPC_BODY_LIMITS: Record<string, number> = {
   [IPC.submitRecording]: 8 * MB,
   [IPC.saveThumbnail]: 8 * MB,
   [IPC.importSmartModel]: 140 * MB, // up to ~100 MB of model files, base64
+  [IPC.importModelFiles]: 140 * MB,
 };
 const DEFAULT_RPC_LIMIT = 256_000;
 

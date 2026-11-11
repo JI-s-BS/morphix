@@ -8,6 +8,7 @@ Turn a spoken idea, a photo or a drawing into a 3D model, check it, slice it, an
   <a href="https://www.youtube.com/watch?v=HJM8_yL3bGg"><img alt="Demo video" src="https://img.shields.io/badge/Demo-YouTube-FF0000?logo=youtube&logoColor=white"></a>
   <img alt="SharkByte 2026: 1st place overall" src="https://img.shields.io/badge/SharkByte%202026-1st%20Place%20Overall-f5b301">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="https://github.com/JI-s-BS/morphix/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/JI-s-BS/morphix/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="Node 22" src="https://img.shields.io/badge/node-22-339933?logo=node.js&logoColor=white">
   <img alt="Linux: arm64, armv7, x86_64" src="https://img.shields.io/badge/linux-arm64%20%C2%B7%20armv7%20%C2%B7%20x86__64-555">
 </p>
@@ -64,6 +65,7 @@ which is why it says "QD330 offline" and "Can't print yet".
 |---|---|
 | 🎤 **Talk to it** | Hold the button and say what you want. Gemini Live answers out loud, asks how big it should be and proposes what to make. Nothing that costs money or moves the printer happens until you tap **Confirm**. |
 | 🧠 **Three ways to make a model** | **Meshy** for toys, figures and things to look at; **Claude + OpenSCAD** for exact-size parts that must fit or work (screw caps, brackets, phone cases); **Smart Model Search** for proven free designs on Printables, Thingiverse, MakerWorld and GitHub, with licence and "has it been printed?" checks. Morphix recommends one and you choose. |
+| 📂 **Bring your own file** | **My Things → Import a file**: STL, 3MF, OBJ, PLY or GLB, kept at its exact size. No AI keys needed. |
 | 📷 **From a photo or drawing** | Photo / drawing / scan → printable model ([how](docs/AI.md#photo-to-model)). |
 | 🧊 **See it first** | A 3D viewer with the real size in mm and a "fits the printer?" check. Pick a height, width or length and it rescales. |
 | 🛠️ **Prepare** | Repair the mesh, lay it flat, check the build volume, then slice with PrusaSlicer, OrcaSlicer or Bambu Studio. An AI advisor picks layer height, infill, supports and brim, and says why. Or choose them yourself. |
@@ -303,8 +305,8 @@ The original hackathon hardware was a Raspberry Pi 4 with a 1024×600 touchscree
 
 <details><summary><b>Do I need any AI keys?</b></summary>
 
-No. Without keys you can import models (STL/GLB, or from the model libraries), check them, slice and print. Keys add voice (Gemini),
-generated models (Meshy) and exact-size CAD (Claude).
+No. Without keys you can import model files (STL, 3MF, OBJ, PLY, GLB) on **My Things → Import a file**, check them, slice and print.
+Keys add voice (Gemini), generated models (Meshy), exact-size CAD (Claude) and model-library search (Gemini or a Thingiverse token).
 </details>
 
 <details><summary><b>Does it need the internet or the printer maker's cloud?</b></summary>
@@ -349,7 +351,7 @@ Otherwise a driver is one file; see [Development](#development). Requests are we
 | "Setup isn't finished" / signed out | Sign in as the admin. Forgot the password? Run `morphix reset-admin` on the Morphix machine. |
 | Printer shows **offline** | Check its IP address (it can change; a DHCP reservation helps), that LAN mode / the API is on, and the access code. **Test connection** on the setup page explains what failed. |
 | "No slicer is installed" | Install PrusaSlicer (or OrcaSlicer / Bambu Studio for Bambu printers). The slicer step shows the command for your system. Then **Check again**. |
-| A new key or printer isn't used | Run `morphix restart` after saving (the server reads settings at start-up). |
+| A new key or printer isn't used | Run `morphix restart` after saving (the server reads settings at start-up). You'll need to sign in again afterwards. |
 | Voice doesn't work | Microphones need a secure page: use `http://localhost` on the machine itself, or turn on HTTPS for other devices. Check the Gemini key on the setup page. |
 | Something else | `morphix logs -f` shows what happened; `morphix doctor` suggests fixes. Errors in the app have a code; look it up in [docs/ERRORS.md](docs/ERRORS.md). |
 
@@ -362,7 +364,7 @@ Otherwise a driver is one file; see [Development](#development). Requests are we
 - [x] One-line install, update, rollback, doctor, backup
 - [ ] Moonraker/Klipper, OctoPrint, PrusaLink and Duet drivers
 - [ ] Hardware testing with the community (turn "protocol" into "tested")
-- [ ] Apply new settings without a restart
+- [ ] Apply new settings without a restart (and keep everyone signed in across restarts)
 - [ ] Print Guardian with every printer's own camera
 - [ ] Photo-to-3D upload from the phone website
 - [ ] A print queue across several printers
@@ -372,7 +374,7 @@ Otherwise a driver is one file; see [Development](#development). Requests are we
 
 ```bash
 npm ci
-npm test              # Vitest
+npm test              # Vitest (~1,000 tests; see docs/TESTING.md for the optional tools that unlock the rest)
 npm run typecheck     # TypeScript
 npm run build:server  # apps/server/dist/server.cjs
 npm run dev:renderer  # Vite dev server for the UI; proxies /api to MORPHIX_DEV_SERVER (default :8080)

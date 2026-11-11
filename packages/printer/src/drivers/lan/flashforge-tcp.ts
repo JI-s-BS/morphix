@@ -132,8 +132,9 @@ class FlashforgeTcpConnection implements PrinterConnection {
         nozzle: st.temps?.nozzle ? temp(st.temps.nozzle.current, st.temps.nozzle.target) : undefined,
         bed: st.temps?.bed ? temp(st.temps.bed.current, st.temps.bed.target) : undefined,
       },
+      // While idle, M27 still shows the last job's progress: it tells "finished" from "stopped early".
       job:
-        state === "printing" || state === "paused" || state === "heating"
+        state === "printing" || state === "paused" || state === "heating" || (state === "idle" && (st.progress ?? 0) > 0)
           ? { file: st.currentFile, progress: st.progress !== undefined ? st.progress / 100 : undefined, layer }
           : undefined,
       checkedAt: new Date(this.now()).toISOString(),

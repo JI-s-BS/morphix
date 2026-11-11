@@ -147,6 +147,7 @@ detect_os() {
     value="${value%\"}"; value="${value#\"}"
     case "$key" in ID) ID="$value" ;; ID_LIKE) ID_LIKE="$value" ;; PRETTY_NAME) PRETTY_NAME="$value" ;; esac
   done <"$file"
+  # shellcheck disable=SC2034 # OS_ID is part of detect_os's result (read by tests and for messages)
   OS_ID="$ID" OS_NAME="${PRETTY_NAME:-$ID}" PKG=""
   case " $ID $ID_LIKE " in
     *" debian "* | *" ubuntu "* | *" raspbian "*) PKG=apt ;;

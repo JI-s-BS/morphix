@@ -454,6 +454,8 @@ export function guarded(access: Access, setupOpen: () => Promise<boolean>, handl
     try {
       await handler(ctx);
     } catch (e) {
+      // The server's own HTTP errors (body too large, bad JSON …) carry their status: let the server answer them.
+      if (typeof (e as { status?: unknown })?.status === "number") throw e;
       if (e instanceof InputError) ctx.send(400, { error: e.message, ...(e.field ? { field: e.field } : {}) });
       else if (e instanceof CorruptUsersFile) ctx.send(503, { error: e.message });
       else if (e instanceof SyntaxError || (e as Error)?.name === "SyntaxError") ctx.send(400, { error: "The request wasn't valid JSON." });

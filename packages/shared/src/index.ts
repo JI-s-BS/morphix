@@ -430,6 +430,8 @@ export interface MorphixApi {
   smartSearchState(): Promise<SmartSearchState | null>;
   selectSmartModel(id: string): Promise<SmartModelResult>;
   importSmartModel(resultId: string, files: { name: string; bytes: ArrayBuffer }[]): Promise<{ projectId: string; versionId: string; parts: string[]; warnings: string[] }>;
+  /** Model files from this device (STL, 3MF, OBJ, PLY, GLB): a new project, no AI needed. */
+  importModelFiles(files: { name: string; bytes: ArrayBuffer }[]): Promise<{ projectId: string; versionId: string; parts: string[]; warnings: string[] }>;
   /** Thingiverse results only (official API, needs THINGIVERSE_TOKEN). */
   downloadSmartModel(resultId: string): Promise<{ projectId: string; versionId: string; parts: string[]; warnings: string[] }>;
   /** Source, licence, parts, plates and assembly of an imported library model (null otherwise). */

@@ -164,7 +164,7 @@ function LibraryPanel({ manifest: m, projectId, onError, onPlate }: { manifest: 
   return (
     <div className="card">
       <h3>📦 From {m.sourceName}</h3>
-      <div className="small">{m.creator ? `by ${m.creator} · ` : ""}{m.license ? `${m.license}${m.licenseVerified ? " ✓" : " (as listed — check the page)"}` : "Licence: check the page"}</div>
+      {m.source ? <div className="small">{m.creator ? `by ${m.creator} · ` : ""}{m.license ? `${m.license}${m.licenseVerified ? " ✓" : " (as listed — check the page)"}` : "Licence: check the page"}</div> : <div className="small">Imported from a file on your device, at its own size.</div>}
       <div className="muted small" style={{ wordBreak: "break-all" }}>{m.source}</div>
       <div className="field-label" style={{ marginTop: 6 }}>Printed parts ({m.parts.length})</div>
       {m.parts.map((p) => (
@@ -192,7 +192,7 @@ function LibraryPanel({ manifest: m, projectId, onError, onPlate }: { manifest: 
           <ol className="small" style={{ margin: "2px 0 0", paddingLeft: 18 }}>{m.assembly.map((a, i) => <li key={i}>{a}</li>)}</ol>
         </>
       )}
-      <div className="muted small" style={{ marginTop: 6 }}>{m.evidence.length ? `Printed by others: ${m.evidence.join("; ")}` : "No print reports found — it hasn't been shown to work yet."}</div>
+      {m.source ? <div className="muted small" style={{ marginTop: 6 }}>{m.evidence.length ? `Printed by others: ${m.evidence.join("; ")}` : "No print reports found — it hasn't been shown to work yet."}</div> : null}
       {m.warnings.map((w) => <div key={w} className="small warn-line" style={{ color: "var(--warn)" }}>⚠ {w}</div>)}
       {m.preserved.length > 0 && <div className="muted small">Kept with the project: {m.preserved.join(", ")}</div>}
     </div>

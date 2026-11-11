@@ -27,7 +27,7 @@ import { Jobs } from "../../desktop/electron/jobs";
 import { PhotoPipeline } from "../../desktop/electron/photo";
 import { GuardianVoice } from "../../desktop/electron/guardian-voice";
 import { LocalTts } from "../../desktop/electron/tts";
-import { importLibraryModel, libraryManifest, useLibraryPlate } from "../../desktop/electron/library-import";
+import { importLibraryModel, importModelFiles, libraryManifest, useLibraryPlate } from "../../desktop/electron/library-import";
 import { cadGeneratorFromEnv } from "../../desktop/electron/cad";
 import { startBusyMarker } from "../../desktop/electron/busy";
 import { appSelfHealDeps, installSelfHealing } from "../../desktop/electron/self-heal";
@@ -507,6 +507,13 @@ export async function createCore(o: CoreOptions): Promise<Core> {
   handle(IPC.importSmartModel, (resultId: string, files: { name: string; bytes: ArrayBuffer }[]) => {
     if (!Array.isArray(files) || files.length > 200) throw new Error("choose between 1 and 200 files");
     return importSearchResult(String(resultId), files.map((f) => ({ name: String(f?.name), bytes: toBuffer(f?.bytes) })));
+  });
+  handle(IPC.importModelFiles, (files: { name: string; bytes: ArrayBuffer }[]) => {
+    if (!Array.isArray(files) || !files.length || files.length > 200) throw new Error("Choose between 1 and 200 model files (STL, 3MF, OBJ, PLY or GLB).");
+    const r = importModelFiles(ctx, files.map((f) => ({ name: String(f?.name ?? "model.stl"), bytes: toBuffer(f?.bytes) })));
+    ctx.currentProjectId = r.projectId;
+    ctx.event({ type: "navigate", page: "viewer", projectId: r.projectId });
+    return { projectId: r.projectId, versionId: r.versionId, parts: r.parts, warnings: r.warnings };
   });
   handle(IPC.downloadSmartModel, (resultId: string) => downloadSearchResult(String(resultId)));
   handle(IPC.libraryManifest, (versionId: string) => libraryManifest(ctx, safeId(String(versionId))));

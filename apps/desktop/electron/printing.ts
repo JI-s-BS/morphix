@@ -331,7 +331,7 @@ export class Printing {
   /** Printable file per prepared job (relative path), for print_jobs.file_rel_path. */
   private driverFiles = new Map<string, string>();
   /** The print Morphix started on a driver printer and is following. */
-  private driverJob: { jobId: string; fileName: string; seenActive: boolean; lastProgress: number; sawFinishing: boolean; cancelRequested: boolean } | null = null;
+  private driverJob: { jobId: string; fileName: string; seenActive: boolean; lastProgress: number; lastLayer?: [number, number]; sawFinishing: boolean; cancelRequested: boolean } | null = null;
 
   /** Slices the placed STL for the driver printer's model and builds the summary the Prepare page shows. */
   private async prepareForDriver(
@@ -489,11 +489,15 @@ export class Printing {
       j.seenActive = true;
       if (st.state === "finishing") j.sawFinishing = true;
       if (typeof st.job?.progress === "number") j.lastProgress = st.job.progress;
+      if (st.job?.layer) j.lastLayer = st.job.layer;
       if (st.state === "printing" && this.printJobView) {
         this.jobs?.update(this.printJobView, "print", Math.round(j.lastProgress * 100), st.job?.layer?.[1] ? `Layer ${st.job.layer[0]} of ${st.job.layer[1]}` : undefined);
       }
     } else if (j.seenActive && (st.state === "idle" || st.state === "error")) {
-      const ev = j.cancelRequested ? "cancelled" : st.state === "idle" && (j.sawFinishing || j.lastProgress >= 0.95) ? "completed" : "failed";
+      // Polls can miss the last percent: also look at what the printer reports now that it is idle.
+      const reached = (p?: number, l?: [number, number]) => (p ?? 0) >= 0.95 || (!!l && l[1] > 0 && l[0] >= l[1]);
+      const done = j.sawFinishing || reached(j.lastProgress, j.lastLayer) || reached(st.job?.progress, st.job?.layer);
+      const ev = j.cancelRequested ? "cancelled" : st.state === "idle" && done ? "completed" : "failed";
       this.ctx.log.write("info", `print ${ev}`, { jobId: j.jobId, file: j.fileName, state: st.state });
       this.driverJob = null;
       this.finishJob(j.jobId, ev);

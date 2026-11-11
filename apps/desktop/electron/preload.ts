@@ -28,6 +28,7 @@ const api: MorphixApi = {
   smartSearchState: () => ipcRenderer.invoke(IPC.smartSearchState),
   selectSmartModel: (id) => ipcRenderer.invoke(IPC.selectSmartModel, id),
   importSmartModel: (resultId, files) => ipcRenderer.invoke(IPC.importSmartModel, resultId, files),
+  importModelFiles: (files) => ipcRenderer.invoke(IPC.importModelFiles, files),
   downloadSmartModel: (resultId) => ipcRenderer.invoke(IPC.downloadSmartModel, resultId),
   libraryManifest: (versionId) => ipcRenderer.invoke(IPC.libraryManifest, versionId),
   libraryPlate: (projectId, plate) => ipcRenderer.invoke(IPC.libraryPlate, projectId, plate),

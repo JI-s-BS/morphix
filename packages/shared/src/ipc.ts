@@ -17,6 +17,7 @@ export const IPC = {
   smartSearchState: "models:smart-search-state",
   selectSmartModel: "models:smart-select",
   importSmartModel: "models:smart-import",
+  importModelFiles: "models:import-files",
   downloadSmartModel: "models:smart-download",
   libraryManifest: "models:library-manifest",
   libraryPlate: "models:library-plate",

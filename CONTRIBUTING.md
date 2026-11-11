@@ -14,7 +14,7 @@ access codes and personal information first.** Security problems: see [SECURITY.
 1. Create a branch for your change.
 2. `npm ci` (set `ELECTRON_SKIP_BINARY_DOWNLOAD=1` if you don't need the kiosk).
 3. Make a focused change and update the relevant docs.
-4. Run `npm run typecheck`, `npm test`, and `npm run build:server && npm run build:renderer`.
+4. Run `npm run typecheck`, `npm test`, and `npm run build:server && npm run build:renderer` ([docs/TESTING.md](docs/TESTING.md) lists the optional tools that unlock every test).
 5. Describe what you checked, including any hardware you tried it on, and what you could not check.
 
 ## Adding a printer

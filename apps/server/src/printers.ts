@@ -38,7 +38,8 @@ export function toPrinterStatus(s: DriverStatus): PrinterStatus {
   const out: PrinterStatus = {
     online: s.state !== "offline",
     checkedAt: s.checkedAt,
-    machine: s.state.toUpperCase(),
+    // PrinterStatus speaks the QD330's words: READY = idle (the UI checks for it).
+    machine: s.state === "idle" ? "READY" : s.state.toUpperCase(),
   };
   if (s.state === "offline" || s.state === "error") out.error = s.message ?? (s.state === "offline" ? "printer offline" : "printer error");
   if (s.job?.file) out.currentFile = s.job.file;

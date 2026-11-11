@@ -80,7 +80,7 @@ export function importLibraryModel(ctx: Ctx, result: SmartModelResult, files: Im
   const versionId = randomUUID();
   const t = now();
   ctx.db.run("INSERT INTO projects(id, title, prompt, state, created_at, updated_at) VALUES (?,?,?,?,?,?)", [
-    projectId, result.name.slice(0, 60), `${result.name} — imported from ${result.pageUrl}`, "idea", t, t,
+    projectId, result.name.slice(0, 60), result.pageUrl ? `${result.name} — imported from ${result.pageUrl}` : `${result.name} — imported from a file`, "idea", t, t,
   ]);
   moveProject(ctx, projectId, "generating");
   const dir = ctx.storage.modelDir(projectId, versionId);
@@ -94,7 +94,7 @@ export function importLibraryModel(ctx: Ctx, result: SmartModelResult, files: Im
   };
   const manifest: LibraryManifest = {
     source: result.pageUrl,
-    sourceName: SOURCE_NAME[result.source] ?? "the source site",
+    sourceName: result.pageUrl ? SOURCE_NAME[result.source] ?? "the source site" : "your file",
     license: result.license,
     licenseVerified: result.licenseVerified,
     creator: result.creator,
@@ -126,6 +126,18 @@ export function importLibraryModel(ctx: Ctx, result: SmartModelResult, files: Im
 }
 
 /** The manifest of a library model version (null for Meshy/demo models). */
+/** A model file the user picked (no search result behind it): same import, kept at its exact size. */
+export function importModelFiles(ctx: Ctx, files: ImportedFile[]): LibraryImportResult {
+  const first = files.find((f) => isModelFileName(f.name)) ?? files[0];
+  const name = (first?.name ?? "model").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 60) || "Imported model";
+  const result: SmartModelResult = {
+    id: `file-${randomUUID()}`, source: "other", name, pageUrl: "", imageUrl: null, thumbUrl: null, qrDataUrl: null,
+    description: "", license: null, licenseVerified: false, creator: null, parts: [], nonPrintedParts: [], assembly: [],
+    printAsIs: true, evidence: [], files: [], download: "manual",
+  };
+  return importLibraryModel(ctx, result, files);
+}
+
 export function libraryManifest(ctx: Ctx, versionId: string): LibraryManifest | null {
   const a = ctx.db.get("SELECT rel_path FROM assets WHERE version_id = ? AND kind = 'assembly-manifest' ORDER BY created_at DESC LIMIT 1", [versionId]);
   if (!a) return null;

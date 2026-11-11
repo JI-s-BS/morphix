@@ -234,7 +234,7 @@ previous_release() { release_name previous; }
 list_releases() {
   local d
   [[ -d "$(releases_dir)" ]] || return 0
-  # shellcheck disable=SC2012 # names are hex SHAs, ls -t is fine here
+  # shellcheck disable=SC2012,SC2045 # names are hex SHAs, ls -t is fine here
   for d in $(ls -1t "$(releases_dir)" 2>/dev/null); do
     [[ -d "$(releases_dir)/$d" && "$d" != *.new && ! -f "$(releases_dir)/$d/.failed-health" ]] && echo "$d"
   done
@@ -637,15 +637,15 @@ EOF
 }
 
 main() {
-  local cmd="${1:-help}"
+  local sub="${1:-help}"
   [[ $# -gt 0 ]] && shift
-  case "$cmd" in
+  case "$sub" in
     help | -h | --help) usage; return 0 ;;
   esac
   load_conf
-  case "$cmd" in
+  case "$sub" in
     status) cmd_status ;;
-    start | stop | restart) cmd_service "$cmd" ;;
+    start | stop | restart) cmd_service "$sub" ;;
     logs) cmd_logs "$@" ;;
     update) cmd_update "$@" ;;
     rollback) cmd_rollback "$@" ;;

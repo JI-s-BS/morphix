@@ -97,6 +97,7 @@ export function createMockApi(): MorphixApi {
     smartSearchState: async () => null,
     selectSmartModel: async () => { throw new Error("No preview search result"); },
     importSmartModel: async () => { throw new Error("Import is unavailable in preview mode"); },
+    importModelFiles: async () => { throw new Error("Import is unavailable in preview mode"); },
     downloadSmartModel: async () => { throw new Error("Download is unavailable in preview mode"); },
     libraryManifest: async () => null,
     libraryPlate: async () => { throw new Error("unavailable in preview mode"); },
