@@ -450,12 +450,13 @@ cmd_status() {
   cur="$(current_release)"
   say "Morphix ($MODE install)"
   say "  service:  ${active:-unknown}"
-  say "  release:  ${cur:-none} $( [[ -n "$cur" ]] && release_info "$cur")"
+  say "  release:  ${cur:-none} $( [[ -n "$cur" ]] && release_info "$cur" | sed "s/^release=[^ ]* *//")"
   say "  channel:  $CHANNEL"
   say "  data dir: $DATA_DIR"
   if health_once; then say "  health:   ok ($(health_url))"; else say "  health:   not answering ($(health_url))"; fi
   if reason="$(busy_reason "$DATA_DIR")"; then say "  busy:     $reason"; fi
-  say "  auto-update: $(systemctl_scope is-enabled morphix-update.timer 2>/dev/null || echo disabled)"
+  local au; au="$(systemctl_scope is-enabled morphix-update.timer 2>/dev/null || true)"
+  say "  auto-update: ${au:-disabled}"
   lan_urls | sed 's/^/  open:     /'
 }
 

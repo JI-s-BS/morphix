@@ -97,7 +97,7 @@ EOF
 # ---------------------------------------------------------------- parsing ---
 parse_args() {
   SCOPE=system CHANNEL_ARG="" SKIP_TESTS=0 WITH_PRUSA=0 WITH_EXTRAS=0 KIOSK=0 KIOSK_USER="" AUTO_UPDATE=0
-  PORT_ARG="" REPO_URL="$DEFAULT_REPO_URL" FORCE=0 DRY_RUN=0 UNINSTALL=0 PURGE=0 ASSUME_YES=0
+  PORT_ARG="" PORT_CHANGED=0 REPO_URL="$DEFAULT_REPO_URL" FORCE=0 DRY_RUN=0 UNINSTALL=0 PURGE=0 ASSUME_YES=0
   while (($#)); do
     case "$1" in
       --user) SCOPE=user ;;
@@ -459,6 +459,8 @@ EOF
   if [[ -f "$ENV_FILE" && -z "$PORT_ARG" ]]; then
     say "keeping $ENV_FILE"
   else
+    # A re-run with a different --port must restart the service even when the code is up to date.
+    if [[ -f "$ENV_FILE" ]] && ! grep -qx "MORPHIX_PORT=$PORT" "$ENV_FILE" 2>/dev/null; then PORT_CHANGED=1; fi
     local owner=""; [[ "$SCOPE" == system ]] && owner="root:$SERVICE_USER"
     write_file "$ENV_FILE" 0640 "$owner" "$root" <<EOF
 # Morphix server settings. No secrets here: API keys and passwords are set on the setup page
@@ -506,9 +508,12 @@ first_deploy() {
   if [[ "$DRY_RUN" == 1 ]]; then say "[dry-run] $CLI ${args[*]}"; return 0; fi
   if [[ "$SCOPE" == system && "$(id -u)" -ne 0 ]]; then
     sudo env MORPHIX_INSTALL_CONF="$CONF_FILE" "$CLI" "${args[@]}"
+    [[ "$PORT_CHANGED" == 1 ]] && sudo env MORPHIX_INSTALL_CONF="$CONF_FILE" "$CLI" restart
   else
     MORPHIX_INSTALL_CONF="$CONF_FILE" "$CLI" "${args[@]}"
+    [[ "$PORT_CHANGED" == 1 ]] && MORPHIX_INSTALL_CONF="$CONF_FILE" "$CLI" restart
   fi
+  return 0
 }
 
 # ------------------------------------------------------------------ kiosk ---
