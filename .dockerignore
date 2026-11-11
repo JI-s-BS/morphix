@@ -1,0 +1,9 @@
+.git
+node_modules
+**/node_modules
+**/dist
+.claude
+*.log
+.env
+**/*.env
+!config/morphix.env.example

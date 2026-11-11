@@ -1,0 +1,13 @@
+# Nightly `morphix update --auto` (opt-in: morphix auto-update on). It waits while a print or
+# job is running and skips the night if Morphix stays busy; a failed health check rolls back.
+[Unit]
+Description=Morphix automatic update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=MORPHIX_SCOPE=@SCOPE@
+ExecStart=@CLI@ update --auto
+Nice=10
+IOSchedulingClass=idle

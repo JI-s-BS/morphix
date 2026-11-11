@@ -1,0 +1,23 @@
+# Morphix headless server (--user install, runs as you). Rendered by scripts/install/install.sh.
+# Starts at boot only with lingering: loginctl enable-linger $USER
+[Unit]
+Description=Morphix 3D printing server
+Documentation=https://github.com/JI-s-BS/morphix/blob/main/docs/INSTALL.md
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-@ENV_FILE@
+Environment=NODE_ENV=production
+Environment=MORPHIX_DATA_DIR=@DATA_DIR@
+Environment=MORPHIX_ROOT=@DATA_DIR@
+WorkingDirectory=@APP_ROOT@/current
+ExecStart=@NODE@ @APP_ROOT@/current/apps/server/dist/server.cjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+NoNewPrivileges=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target
