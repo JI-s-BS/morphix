@@ -1,10 +1,10 @@
-// PROPOSED SQLite schema for the guardian, for the integrator to merge into
-// packages/database (this package does not touch the app database itself).
+// SQLite schema for the guardian. This package does not open the app database
+// itself; the app runs applyGuardianSchema() on it at startup.
 //
-// Phase 1 already creates monitoring_sessions and failure_alerts with a small
-// set of columns, so the proposal is additive:
+// packages/database already creates monitoring_sessions and failure_alerts with a
+// small set of columns, so this schema is additive:
 //   1. GUARDIAN_SCHEMA_SQL: CREATE TABLE IF NOT EXISTS for all guardian tables
-//      (the two Phase 1 tables are repeated with their ORIGINAL columns only,
+//      (the two base tables are repeated with their ORIGINAL columns only,
 //      so the statement is a no-op on existing databases).
 //   2. GUARDIAN_COLUMN_MIGRATIONS: [table, column, definition] triples in the
 //      same shape as packages/database's add(table, col, def) helper.
@@ -43,7 +43,7 @@ export const GUARDIAN_COLUMN_MIGRATIONS: ReadonlyArray<readonly [table: string, 
   ["monitoring_sessions", "evidence_rel_dir", "TEXT"],
   ["monitoring_sessions", "end_reason", "TEXT"],
   ["monitoring_sessions", "worker_restarts", "INTEGER NOT NULL DEFAULT 0"],
-  // failure_alerts.level keeps the Phase 1 meaning (a short severity string);
+  // failure_alerts.level keeps its original meaning (a short severity string);
   // state holds the full guardian AlertState.
   ["failure_alerts", "state", "TEXT NOT NULL DEFAULT 'possible_failure'"],
   ["failure_alerts", "score", "REAL"],
@@ -74,11 +74,4 @@ export function applyGuardianSchema(db: SqlExec): void {
   for (const [table, col, def] of GUARDIAN_COLUMN_MIGRATIONS) {
     if (!cols(table).has(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
   }
-}
-
-/** Short severity string for the Phase 1 failure_alerts.level column. */
-export function levelForState(state: string): "warning" | "critical" | "info" {
-  if (state === "possible_failure") return "warning";
-  if (state === "resolved" || state === "false_alarm") return "info";
-  return "critical";
 }

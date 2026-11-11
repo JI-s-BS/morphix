@@ -1,15 +1,14 @@
 // PrintGuardian: wires the vision worker, the alert state machine, Gemini
-// verification, optional cloud extras and a persistence hook together.
+// verification, a local review and a persistence hook together.
 // Electron main process only. It never sends anything to the printer; pausing
-// goes through AlertMachineOptions.pauseHook (Phase 5) or the operator.
+// goes through AlertMachineOptions.pauseHook (the printer controller) or the operator.
 import { readFile as fsReadFile } from "node:fs/promises";
 import { join, relative, isAbsolute } from "node:path";
 import { AlertStateMachine, STATE_LABELS, defaultIsPaused } from "./alerts";
 import type { Alert, AlertMachineOptions, GuardianState, PrinterStatusLike, Transition } from "./alerts";
 import type { FailureKind, VisionEvent, VisionEventOf } from "./events";
 import type { GeminiVisionClient } from "./gemini";
-import type { ReviewResult, SwarmsReviewClient, TelemetrySync } from "./cloud";
-import { localReview } from "./cloud";
+import { localReview } from "./review";
 import { StallMonitor } from "./stall";
 import type { GuardianPrinterStatus, StallOptions, StallPhase } from "./stall";
 import { VisionWorker } from "./worker";
@@ -46,26 +45,6 @@ export interface GuardianStore {
   evidenceSaved(e: EvidenceRecord): void | Promise<void>;
 }
 
-export class MemoryGuardianStore implements GuardianStore {
-  sessions = new Map<string, SessionRecord>();
-  alerts = new Map<string, Alert>();
-  transitions: Transition[] = [];
-  evidence: EvidenceRecord[] = [];
-  sessionStarted(s: SessionRecord) {
-    this.sessions.set(s.id, { ...s });
-  }
-  sessionEnded(s: SessionRecord) {
-    this.sessions.set(s.id, { ...s });
-  }
-  alertChanged(a: Alert, t: Transition | null) {
-    this.alerts.set(a.id, structuredClone(a));
-    if (t) this.transitions.push(t);
-  }
-  evidenceSaved(e: EvidenceRecord) {
-    this.evidence.push(e);
-  }
-}
-
 export type CameraState = "unknown" | "ok" | "lost" | "frozen";
 
 export interface GuardianSnapshot {
@@ -83,8 +62,6 @@ export interface GuardianSnapshot {
   printerPhase: StallPhase;
   autoPause: boolean;
   gemini: { available: boolean; model?: string; callsToday?: number; dailyCap?: number };
-  swarms: boolean;
-  telemetry: { enabled: boolean; pending: number };
 }
 
 export interface VisionWorkerLike {
@@ -96,7 +73,7 @@ export interface VisionWorkerLike {
 }
 
 export interface PrintGuardianOptions {
-  /** Morphix storage root, e.g. /home/jd/Morphix. Evidence goes to <root>/snapshots/<session>/. */
+  /** Morphix storage root. Evidence goes to <root>/snapshots/<session>/. */
   storageRoot: string;
   /** services/vision directory (contains the morphix_vision package). */
   visionDir: string;
@@ -107,8 +84,10 @@ export interface PrintGuardianOptions {
   /** Printer unreachable this long before the camera checks are switched off. Default 60 s. */
   offlineGraceMs?: number;
   gemini?: GeminiVisionClient;
-  swarms?: SwarmsReviewClient;
-  telemetry?: TelemetrySync;
+  /** @deprecated Removed (Swarms / Tiger Data); ignored. Drop with compat.ts. */
+  swarms?: undefined;
+  /** @deprecated Removed (Swarms / Tiger Data); ignored. Drop with compat.ts. */
+  telemetry?: undefined;
   store?: GuardianStore;
   readFile?: (path: string) => Promise<Uint8Array>;
   createWorker?: (config: VisionWorkerConfig, handlers: VisionWorkerHandlers) => VisionWorkerLike;
@@ -139,8 +118,6 @@ export class PrintGuardian {
     this.stall = new StallMonitor({ isPaused: o.alerts?.isPaused, ...o.stall });
     this.alerts.onTransition((t, a) => {
       if (a) this.persist(() => this.o.store?.alertChanged(a, t));
-      this.o.telemetry?.record({ at: t.at, sessionId: this.session?.id ?? null, type: "transition", state: t.to, kind: a?.kind, data: { from: t.from, reason: t.reason } });
-      void this.o.telemetry?.flush();
       this.changed();
     });
   }
@@ -199,7 +176,6 @@ export class PrintGuardian {
     }
     this.session = null;
     this.camera = "unknown";
-    void this.o.telemetry?.flush();
     this.changed();
   }
 
@@ -273,8 +249,6 @@ export class PrintGuardian {
       printerPhase: this.stall.phase,
       autoPause: this.alerts.autoPauseActive,
       gemini: { available: !!g?.available, model: g?.model, callsToday: usage?.callsToday, dailyCap: usage?.dailyCap },
-      swarms: !!this.o.swarms?.enabled,
-      telemetry: { enabled: !!this.o.telemetry?.enabled, pending: this.o.telemetry?.pending.length ?? 0 },
     };
   }
 
@@ -308,7 +282,6 @@ export class PrintGuardian {
     const alert = this.alerts.alert;
 
     if (e.type === "possible_failure" || e.type === "confirmed_failure") {
-      this.o.telemetry?.record({ at: e.ts, sessionId: this.session?.id ?? null, type: e.type, kind: e.kind, value: e.score });
       if (e.evidence) this.recordEvidence(e.evidence, e.type === "confirmed_failure" ? "confirmed" : "suspect", e.kind, alert?.id ?? null, e.ts);
     }
     // verify once, when this event is what confirmed the alert
@@ -343,16 +316,9 @@ export class PrintGuardian {
         ? { source: "gemini", status: "ok", problem: geminiResult.problem, confidence: geminiResult.confidence, explanation: geminiResult.explanation, model: geminiResult.model }
         : { source: "gemini", status: "unavailable", detail: geminiResult.reason + (geminiResult.detail ? `: ${geminiResult.detail}` : "") });
     }
-    const input = { kind: e.kind, localConfirmed: true, localScore: e.score, gemini: geminiResult, printerState: this.printer?.machine };
-    let review: ReviewResult;
-    try {
-      review = this.o.swarms ? await this.o.swarms.review(input) : localReview(input);
-    } catch {
-      review = localReview(input);
-    }
+    const review = localReview({ kind: e.kind, localConfirmed: true, localScore: e.score, gemini: geminiResult, printerState: this.printer?.machine });
     this.alerts.addVerification(alert.id, {
-      source: review.source, status: "ok", problem: review.recommendation, confidence: review.confidence,
-      explanation: review.rationale + (review.fallbackReason ? ` (${review.fallbackReason})` : ""),
+      source: review.source, status: "ok", problem: review.recommendation, confidence: review.confidence, explanation: review.rationale,
     });
     this.persist(() => this.o.store?.alertChanged(alert, null));
     this.changed();

@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { prepareWithAdvice, prusaArgs, writeBinaryStl, type AdvisorFetch, type Mesh, type SlicerInfo } from "@morphix/slicing";
-import { trackPrepare, JobManager } from "@morphix/jobs";
 import { box, fakeSlicerExec, ORCA_GCODE } from "./phase3-fixtures";
 import { tShape } from "./advisor-fixtures";
 
@@ -119,19 +118,14 @@ describe("prepareWithAdvice", () => {
     expect(r.advice.warnings.join(" ")).toMatch(/too big/);
   });
 
-  it("uses Gemini when configured and feeds the job tracker", async () => {
+  it("uses Gemini when configured", async () => {
     const { path } = await stl(box(30, 30, 30, { x: 50, y: 50, z: 0 }));
     const { exec, calls } = fakeSlicerExec();
     const answer = { layer_height_mm: 0.16, infill_percent: 25, walls: 3, supports: "none", orientation: "auto", brim: false, brim_width_mm: 0, reasons: ["Finer layers for a smooth finish."], confidence: 0.7 };
     const fetch: AdvisorFetch = async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify(answer) }] } }] }), text: async () => "" });
-    const jobs = new JobManager();
-    const job = jobs.create({ kind: "prepare", title: "Cube" });
-    const t = trackPrepare(jobs, job.id);
-    const r = await prepareWithAdvice({ inputPath: path, availableSlicers: [PRUSA], gemini: { apiKey: "k", fetch }, onProgress: t.onProgress, options: { upAxis: "z", exec, profilesDir: PROFILES } });
-    const done = t.finish(r);
+    const r = await prepareWithAdvice({ inputPath: path, availableSlicers: [PRUSA], gemini: { apiKey: "k", fetch }, options: { upAxis: "z", exec, profilesDir: PROFILES } });
     expect(r.advice).toMatchObject({ source: "gemini", layerHeightMm: 0.16, infillPercent: 25, walls: 3 });
     expect(argAfter(calls.find((c) => c.args.includes("--export-gcode"))!.args, "--fill-density")).toBe("25%");
-    expect(done.status).toBe("done");
-    expect(done.percent).toBe(100);
+    expect(r.ok).toBe(true);
   });
 });

@@ -1,3 +1,3 @@
-# Runtime (on the Pi you can use apt instead: sudo apt install python3-opencv python3-numpy)
+# Runtime for the Print Guardian camera worker (or use the distro packages, see README.md)
 numpy>=1.24
 opencv-python-headless>=4.8

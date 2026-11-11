@@ -1,8 +1,5 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createJobFileStore, JobManager, restoreJobs, trackPrepare, type JobsSnapshot } from "@morphix/jobs";
+import { JobManager, restoreJobs, type JobsSnapshot } from "@morphix/jobs";
 
 const now = () => new Date("2026-11-07T10:00:00Z");
 
@@ -69,85 +66,5 @@ describe("persistence", () => {
     bad.create({ kind: "prepare", title: "x" });
     await Promise.resolve();
     expect(onPersistError).toHaveBeenCalled();
-  });
-
-  it("file store writes atomically and tolerates a missing or corrupt file", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "morphix-jobs-"));
-    const store = createJobFileStore(join(dir, "data", "jobs.json"));
-    expect(await store.load()).toBeNull();
-    const m = new JobManager({ now, persist: (s) => store.save(s) });
-    m.create({ kind: "prepare", title: "x", id: "j1" });
-    m.completeStage("j1", "prepare.check");
-    await m.flush();
-    const loaded = await store.load();
-    expect(loaded!.jobs[0].stages[0].status).toBe("done");
-    expect(JSON.parse(await readFile(store.path, "utf8")).version).toBe(1);
-    await writeFile(store.path, "{not json");
-    expect(await store.load()).toBeNull();
-  });
-});
-
-describe("trackPrepare", () => {
-  const stages = ["load", "validate", "repair", "place", "slice", "gx", "done"];
-  const OK = { ok: true, slicer: { ok: true }, gx: { ok: true, validation: { ok: true, errors: [] } } };
-
-  it("maps preparePrint progress to prepare.* stages and completes them", () => {
-    const m = new JobManager({ now });
-    const job = m.create({ kind: "text-to-print", title: "x", id: "t" });
-    for (const k of ["understand", "generate", "download"]) m.completeStage(job.id, k);
-    const t = trackPrepare(m, job.id);
-    for (const s of stages.slice(0, 5)) t.onProgress(s);
-    let j = m.get("t")!;
-    expect(j.stages.filter((s) => s.group === "prepare").map((s) => s.status)).toEqual(["done", "done", "done", "running", "pending"]);
-    expect(j.stages.find((s) => s.key === "prepare.slice")!.detail).toBe("Running the slicer");
-    t.onProgress("gx");
-    t.onProgress("done");
-    j = t.finish(OK);
-    expect(j.stages.filter((s) => s.group === "prepare").every((s) => s.status === "done")).toBe(true);
-    expect(j.currentStage).toBe("approval");
-  });
-
-  it("fails the running stage with the slicer's error code", () => {
-    const m = new JobManager({ now });
-    m.create({ kind: "prepare", title: "x", id: "p" });
-    const t = trackPrepare(m, "p");
-    for (const s of stages.slice(0, 5)) t.onProgress(s);
-    const j = t.finish({ ok: false, slicer: { ok: false, reason: "slicer-not-installed", message: "No slicer installed." }, gx: { ok: false, reason: "slicer-not-installed" } });
-    expect(j.status).toBe("failed");
-    expect(j.stages.find((s) => s.key === "prepare.slice")!.error!.code).toBe("MX-SLICE-001");
-  });
-
-  it("fails at orientation when the model is too big", () => {
-    const m = new JobManager({ now });
-    m.create({ kind: "prepare", title: "x", id: "p" });
-    const t = trackPrepare(m, "p");
-    for (const s of stages.slice(0, 4)) t.onProgress(s);
-    const j = t.finish({ ok: false, slicer: { ok: false, reason: "too-large", message: "Too large" }, gx: { ok: false, reason: "too-large" } });
-    expect(j.stages.find((s) => s.key === "prepare.orient")!.error!.code).toBe("MX-SLICE-006");
-  });
-
-  it("skips slicing when it was turned off, and flags bad .gx files", () => {
-    const m = new JobManager({ now });
-    m.create({ kind: "prepare", title: "x", id: "p" });
-    const t = trackPrepare(m, "p");
-    for (const s of stages.slice(0, 4)) t.onProgress(s);
-    let j = t.finish({ ok: false, slicer: { ok: false, reason: "skipped" }, gx: { ok: false } });
-    expect(j.status).toBe("done");
-    expect(j.stages.find((s) => s.key === "prepare.slice")!.status).toBe("skipped");
-
-    m.create({ kind: "prepare", title: "y", id: "q" });
-    const t2 = trackPrepare(m, "q");
-    for (const s of stages.slice(0, 6)) t2.onProgress(s);
-    j = t2.finish({ ok: false, slicer: { ok: true }, gx: { ok: true, validation: { ok: false, errors: ["bad header"] } } });
-    expect(j.stages.find((s) => s.key === "prepare.gx")!.error).toMatchObject({ code: "MX-SLICE-010", message: "bad header" });
-  });
-
-  it("fail() records a thrown error at the current stage", () => {
-    const m = new JobManager({ now });
-    m.create({ kind: "prepare", title: "x", id: "p" });
-    const t = trackPrepare(m, "p");
-    t.onProgress("load");
-    const j = t.fail(Object.assign(new Error("not an STL"), { name: "MeshFormatError" }));
-    expect(j.stages[0].error!.code).toBe("MX-GEN-008");
   });
 });

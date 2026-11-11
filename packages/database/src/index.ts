@@ -1,4 +1,4 @@
-// SQLite (sql.js / WebAssembly, so no native build on the Pi). The database
+// SQLite (sql.js / WebAssembly, so no native build on any platform). The database
 // lives in memory and is flushed atomically to <root>/database/morphix.sqlite.
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 import { copyFileSync, existsSync, readdirSync, readFileSync, statSync, unlinkSync } from "node:fs";

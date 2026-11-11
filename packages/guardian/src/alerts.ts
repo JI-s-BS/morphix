@@ -11,7 +11,7 @@
 // "Pause requested" never means "paused": only a printer status reporting a
 // paused machine moves an alert to pause_confirmed. Auto-pause is OFF by
 // default and this module never talks to the printer: requestPause() calls
-// an injected PauseHook (to be wired by Phase 5) or, without one, asks the
+// an injected PauseHook (the printer controller) or, without one, asks the
 // operator to pause at the printer.
 import type { FailureKind, VisionEvent } from "./events";
 
@@ -25,10 +25,6 @@ export type AlertState =
   | "false_alarm";
 
 export type GuardianState = "idle" | "monitoring" | AlertState;
-
-export const OPEN_ALERT_STATES: readonly AlertState[] = [
-  "possible_failure", "confirmed_failure", "pause_requested", "pause_confirmed", "pause_unconfirmed",
-];
 
 /** Operator-facing wording. Deliberately never says "paused" before the printer confirms it. */
 export const STATE_LABELS: Record<GuardianState, string> = {
@@ -45,7 +41,7 @@ export const STATE_LABELS: Record<GuardianState, string> = {
 
 export interface PauseRequest {
   source: "operator" | "auto";
-  /** "hook": handed to the integrator's PauseHook; "operator_manual": the operator must pause at the printer. */
+  /** "hook": handed to the PauseHook (printer controller); "operator_manual": the operator must pause at the printer. */
   delivery: "hook" | "operator_manual";
   requestedAt: string;
   hookAccepted?: boolean;
@@ -61,7 +57,7 @@ export interface Transition {
 }
 
 export interface AlertVerification {
-  source: "gemini" | "swarms" | "local";
+  source: "gemini" | "local";
   problem?: string;
   confidence?: number;
   explanation?: string;
@@ -100,7 +96,7 @@ export interface PauseHookResult {
 }
 
 /**
- * Integration point for Phase 5. Must only send a validated pause command and
+ * Pause through the printer controller. Must only send a validated pause command and
  * report whether the printer ACCEPTED the request — not whether it paused.
  * The pause is confirmed separately from printer status.
  */
@@ -241,7 +237,7 @@ export class AlertStateMachine {
 
   /**
    * Request a pause for the open alert. With a PauseHook the request goes to
-   * the integrator; without one the operator is asked to pause at the printer.
+   * the app (printer controller); without one the operator is asked to pause at the printer.
    * Either way the alert stays pause_requested until printer status confirms.
    */
   async requestPause(source: "operator" | "auto" = "operator"): Promise<Alert | null> {

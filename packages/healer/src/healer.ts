@@ -416,7 +416,7 @@ export class Healer {
     st.gaveUp = true;
     const mins = Math.round(lim.windowMs / MIN);
     this.record(inc, rid, "gave-up", `${lim.maxAttempts} attempt(s) in ${mins} min did not fix it`);
-    this.o.notify?.({ level: "warn", message: `I tried to fix this myself but couldn't: ${inc.what}.`, hint: "A grown-up can look at the self-heal log in Grown-ups.", code: inc.code });
+    this.o.notify?.({ level: "warn", message: `I tried to fix this myself but couldn't: ${inc.what}.`, hint: "A grown-up can look at the Morphix logs for details.", code: inc.code });
   }
 
   private diagnoseIncident(inc: Incident): void {

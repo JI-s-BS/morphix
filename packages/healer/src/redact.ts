@@ -1,4 +1,4 @@
-// Strip secrets from log text before it leaves the Pi (AI diagnosis).
+// Strip secrets from log text before it leaves this machine (AI diagnosis).
 
 const KEY_NAMES = "api[_-]?key|x-api-key|apikey|token|access[_-]?token|refresh[_-]?token|id[_-]?token|secret|client[_-]?secret|password|passwd|authorization|cookie|session[_-]?secret|key";
 

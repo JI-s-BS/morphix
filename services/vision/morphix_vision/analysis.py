@@ -51,7 +51,7 @@ def roi_pixels(shape: Tuple[int, int], roi: Roi) -> Tuple[int, int, int, int]:
 
 
 def prepare(img: np.ndarray, roi: Roi, analysis_width: int = 320) -> Frame:
-    """Resize to a small working size (fast on a Pi 4) and cut out the ROI."""
+    """Resize to a small working size (fast on small boards) and cut out the ROI."""
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
     if w > analysis_width:

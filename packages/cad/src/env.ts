@@ -1,4 +1,4 @@
-// Builds generator dependencies from the Morphix environment (~/Morphix/config/morphix.env).
+// Builds generator dependencies from the Morphix environment (process.env / the config store).
 import type { ClaudeEffort } from "./claude";
 import type { CadDeps } from "./generate";
 

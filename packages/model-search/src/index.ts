@@ -131,7 +131,7 @@ export interface SmartSearchOptions {
   thingiverseToken?: string;
   fetch?: typeof fetch;
   onChange?: (s: SmartSearchState) => void;
-  /** Keep a copy of a result image on the Pi; returns a URL the touchscreen can show. */
+  /** Keep a local copy of a result image; returns a URL the UI can show. */
   saveImage?: (resultId: string, bytes: Buffer, contentType: string) => string | null;
   /** QR code (data URL) for a source page, to open it on a phone. */
   qrFor?: (url: string) => Promise<string | null>;
@@ -141,7 +141,7 @@ export class SmartModelSearch {
   state: SmartSearchState | null = null;
 
   constructor(private o: SmartSearchOptions) {
-    // A placeholder left in morphix.env ("PASTE_APP_TOKEN_HERE") is not a key.
+    // A placeholder left in the config ("PASTE_APP_TOKEN_HERE") is not a key.
     // Nor is anything with spaces or symbols (e.g. a command pasted by mistake).
     const t = o.thingiverseToken?.trim();
     if (t && (/paste|your_|_here|placeholder|xxx/i.test(t) || !/^[A-Za-z0-9._-]{16,200}$/.test(t))) o.thingiverseToken = undefined;

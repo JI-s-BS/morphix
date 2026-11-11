@@ -1,12 +1,16 @@
-# Vision worker (Phase 4)
+# Vision worker (Print Guardian camera checks)
 
-A Python/OpenCV process that fetches a snapshot from the QD330 camera at a fixed
+Used by the AI Print Guardian (`packages/guardian`); optional: without Python + OpenCV
+the guardian reports the worker as down and everything else keeps working.
+
+A Python/OpenCV process that fetches a snapshot from the printer's camera (any HTTP
+JPEG snapshot URL, e.g. mjpg-streamer's `/?action=snapshot`) at a fixed
 interval, runs local checks, and prints **one JSON event per line on stdout**.
 `@morphix/guardian` (packages/guardian) spawns it, parses the events and runs
 the alert state machine. Gemini is never called from here. The worker never
 talks to the printer. It only *receives* printer state on stdin.
 
-What it checks on each frame (analysed at 320 px width; about 4 ms per 1280×720 frame on a laptop. Pi 4 timing hasn't been measured yet, but it should stay far below the 10 s interval):
+What it checks on each frame (analysed at 320 px width; about 4 ms per 1280×720 frame on a laptop; far below the 10 s interval):
 
 | Check | How | Event |
 |---|---|---|
@@ -36,32 +40,34 @@ Evidence: each suspicious frame is saved as
 `..._confirmed_<kind>.jpg` when a failure is confirmed (at most `--max-evidence`
 files per run).
 
-## Install on the Pi (Debian 13, arm64)
+## Install (Python 3.10+, numpy, OpenCV)
 
 The simplest option uses the distro packages, with no compiler and no wheels:
 
 ```bash
-sudo apt install -y python3-opencv python3-numpy
+sudo apt install -y python3-opencv python3-numpy      # Debian / Ubuntu / Raspberry Pi OS
+sudo dnf install -y python3-opencv python3-numpy      # Fedora
+sudo pacman -S --needed python-opencv python-numpy    # Arch
 ```
 
-Or use a venv. `opencv-python-headless` publishes aarch64 wheels:
+Or use a venv (`opencv-python-headless` publishes x86_64 and aarch64 wheels):
 
 ```bash
-cd ~/morphix/services/vision
+cd services/vision
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-If you use the venv, point the app at it with `MORPHIX_PYTHON=/home/jd/morphix/services/vision/.venv/bin/python`.
+If you use the venv, point the app at it with `MORPHIX_PYTHON=<repo>/services/vision/.venv/bin/python`.
 
 ## Run by hand
 
 ```bash
 cd services/vision
 python3 -m morphix_vision \
-  --snapshot-url 'http://192.168.10.51:8080/?action=snapshot' \
+  --snapshot-url 'http://<printer-ip>:8080/?action=snapshot' \
   --interval 10 \
-  --evidence-dir ~/Morphix/snapshots/manual-test \
+  --evidence-dir /tmp/morphix-snapshots \
   --roi 0.15,0.2,0.7,0.75
 ```
 
@@ -80,7 +86,7 @@ is printed on it, and leave out the rails and the top of the chamber.
 Replay recorded snapshots without the camera:
 
 ```bash
-python3 -m morphix_vision --replay-dir ~/Morphix/snapshots/some-session --no-stdin
+python3 -m morphix_vision --replay-dir <data-dir>/snapshots/<session> --no-stdin
 ```
 
 Run `python3 -m morphix_vision --help` for all thresholds.
@@ -100,4 +106,4 @@ against this worker, run
 `MORPHIX_TEST_PYTHON=$PWD/services/vision/.venv/bin/python ./node_modules/.bin/vitest run tests/phase4-guardian.test.ts`
 from the repo root.
 
-The full event format is in [docs/PHASE4.md](../../docs/PHASE4.md).
+The full event format and state machine are in [docs/GUARDIAN.md](../../docs/GUARDIAN.md).

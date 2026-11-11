@@ -22,8 +22,8 @@ export interface ClaudeDiagnoserOptions {
 }
 
 const SYSTEM = [
-  "You diagnose errors in Morphix, a children's voice-controlled 3D printing appliance on a Raspberry Pi 4",
-  "(Electron app, Afinia QD330 printer over TCP, Gemini Live voice, Meshy model generation, PrusaSlicer, a Python camera watcher).",
+  "You diagnose errors in Morphix, a voice-controlled 3D printing app for families running on a Linux machine",
+  "(Node server or Electron kiosk, a 3D printer over LAN or USB, Gemini Live voice, Meshy model generation, a slicer, a Python camera watcher).",
   "You get one error and recent JSON log lines (secrets removed). Explain what most likely happened.",
   "summary: one sentence a parent understands. likely_cause: one or two technical sentences.",
   "user_hint: one simple thing a grown-up can do. suggested_remediation: one id from the allowed list that would safely help, or \"none\".",
@@ -127,74 +127,13 @@ export function claudeDiagnoserFromEnv(env: Record<string, string | undefined>, 
   });
 }
 
-// ------------------------------------------------------------- Vultr ---
-/** Vultr Serverless Inference (OpenAI-compatible chat API). */
-export const VULTR_INFERENCE_URL = "https://api.vultrinference.com/v1";
-
-export interface VultrDiagnoserOptions {
-  apiKey: string;
-  /** A chat model id from GET /v1/models; picked automatically when unset. */
-  model?: string;
-  baseUrl?: string;
-  fetch?: typeof fetch;
-  timeoutMs?: number;
-  maxLogLines?: number;
-  secrets?: string[];
+/** @deprecated The Vultr backup diagnoser was removed; always null. Kept only so
+ * apps/desktop/electron/self-heal.ts builds until it drops the call (docs/goal-notes/cleanup.md). */
+export function vultrDiagnoserFromEnv(_env?: Record<string, string | undefined>): Diagnoser | null {
+  return null;
 }
 
-/** Prefers an instruction-tuned Llama/Qwen/Mistral chat model from the list. */
-export function pickVultrModel(ids: string[]): string | null {
-  const chat = ids.filter((id) => !/embed|whisper|tts|image|vision|guard|rerank/i.test(id));
-  return chat.find((id) => /instruct/i.test(id)) ?? chat[0] ?? null;
-}
-
-/** Vultr-hosted open model that explains an error the same way Claude does (used when Claude can't). */
-export function createVultrDiagnoser(o: VultrDiagnoserOptions): Diagnoser {
-  const base = (o.baseUrl ?? VULTR_INFERENCE_URL).replace(/\/$/, "");
-  const doFetch = o.fetch ?? fetch;
-  const secrets = [o.apiKey, ...(o.secrets ?? [])];
-  const headers = { "content-type": "application/json", authorization: `Bearer ${o.apiKey}` };
-  let model: string | null = o.model ?? null;
-  return async (input) => {
-    if (!model) {
-      const res = await doFetch(`${base}/models`, { headers, signal: AbortSignal.timeout(15_000) });
-      if (!res.ok) throw new Error(`Vultr models HTTP ${res.status}`);
-      const j = (await res.json()) as { data?: { id?: string }[] };
-      model = pickVultrModel((j.data ?? []).map((m) => String(m.id ?? "")).filter(Boolean));
-      if (!model) throw new Error("Vultr has no chat model available");
-    }
-    const keys = schema().required.join(", ");
-    const res = await doFetch(`${base}/chat/completions`, {
-      method: "POST",
-      headers,
-      signal: AbortSignal.timeout(o.timeoutMs ?? 60_000),
-      body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        max_tokens: 800,
-        messages: [
-          { role: "system", content: `${SYSTEM} Answer with only a JSON object with the keys ${keys}. suggested_remediation must be one of: ${[...REMEDIATION_IDS, "none"].join(", ")}. confidence is low, medium or high.` },
-          { role: "user", content: buildDiagnosisPrompt(input, secrets, o.maxLogLines) },
-        ],
-      }),
-    });
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      throw new Error(`Vultr HTTP ${res.status}: ${redactSecrets(t.slice(0, 300), secrets)}`);
-    }
-    const j = (await res.json()) as { model?: string; choices?: { message?: { content?: string } }[] };
-    return parseDiagnosis(j.choices?.[0]?.message?.content ?? "", `vultr:${j.model ?? model}`);
-  };
-}
-
-/** VULTR_INFERENCE_API_KEY (the Serverless Inference key, not the account API key) + optional MORPHIX_VULTR_MODEL. */
-export function vultrDiagnoserFromEnv(env: Record<string, string | undefined>, extra: Partial<VultrDiagnoserOptions> = {}): Diagnoser | null {
-  const apiKey = (env.VULTR_INFERENCE_API_KEY ?? "").trim();
-  if (!apiKey || env.MORPHIX_SELF_HEAL_AI === "0") return null;
-  return createVultrDiagnoser({ apiKey, model: (env.MORPHIX_VULTR_MODEL ?? "").trim() || undefined, secrets: secretEnvValues(env), ...extra });
-}
-
-/** Tries each diagnoser in order (Claude first, then Vultr) until one answers. */
+/** Tries each diagnoser in order until one answers. */
 export function firstDiagnoser(list: (Diagnoser | null | undefined)[]): Diagnoser | null {
   const ds = list.filter((d): d is Diagnoser => Boolean(d));
   if (!ds.length) return null;

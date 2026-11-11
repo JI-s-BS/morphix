@@ -18,7 +18,7 @@ interface Job {
   percent: number;               // 0-100, weighted; 100 only when every stage is done/skipped
   currentStage: string | null;   // stage to highlight (running/waiting/failed, else next pending)
   createdAt: string; startedAt?: string; finishedAt?: string; updatedAt: string;  // ISO times
-  owner?: string;                // "touchscreen", "voice" or a portal user id (Auth0 sub)
+  owner?: string;                // "touchscreen", "voice" or a portal user id
   error?: SerializedMorphixError; // first failure, for a one-line banner
   meta?: Record<string, unknown>; // app data: project id, model id, file paths…
 }
@@ -52,7 +52,7 @@ otherwise all done/skipped → `done`, otherwise anything started → `running`.
 
 | Kind | Stages (key: label, weight) |
 | --- | --- |
-| `text-to-print` | `understand` Understanding your idea (4) → `generate` Creating your 3D model (30) → `download` Bringing the model home (3) → *prepare* → `approval` Waiting for your OK (1) → `send` Sending it to the printer (4) → `print` Printing (40) → `done` All done! (0) |
+| `text-to-print` | `understand` Understanding your idea (4) → `generate` Creating your 3D model (30) → `download` Bringing the model home (3) → *prepare* → `approval` Waiting for your OK (1) → `send` Sending it to the printer (4) → `print` Printing (40) → `done` All done! (0). With `builder: "openscad"`: `understand` → `build` Claude is designing your part (12) → same tail |
 | `photo-to-print` | `photos` Looking at your photos (8) → `questions` A few quick questions (2) → `build` Creating your 3D model (30) / Building your model from shapes (10, OpenSCAD) → `download` (Meshy only) → same tail |
 | `prepare` | *prepare* → `done` |
 | `print` | `approval` → `send` → `print` → `done` |
@@ -63,19 +63,18 @@ Cutting it into thin layers (8), `prepare.gx` Making the printer file (1).
 
 Template options (`stageTemplate(kind, options)` or `create({ template })`): `approval: false`
 drops the approval stage, `print: false` stops after preparation, `builder: "openscad"` for
-photo jobs (no download stage), `questions: false` drops the questions stage (or `skip()` it at
-run time). Custom stage lists can be passed as `create({ stages: [...] })`.
+text and photo jobs (no download stage), `questions: false` drops the questions stage (or `skip()` it at
+run time). `print` jobs take `approval: false` too. Custom stage lists can be passed as `create({ stages: [...] })`.
 
 The zero-weight `done` stage completes itself once every other stage is done or skipped.
 
 ## API
 
 ```ts
-import { JobManager, createJobFileStore, trackPrepare } from "@morphix/jobs";
+import { JobManager } from "@morphix/jobs";
 
-const store = createJobFileStore(join(morphixHome, "data", "jobs.json"));
-const jobs = new JobManager({ persist: (s) => store.save(s), persistDebounceMs: 500, onPersistError: log.warn });
-jobs.restore(await store.load());           // after a restart: running stages -> interrupted
+const jobs = new JobManager({ persist: (snapshot) => save(snapshot), persistDebounceMs: 400, onPersistError: (e) => log(e) });
+jobs.restore(loadSavedSnapshot());          // after a restart: running stages -> interrupted
 
 const job = jobs.create({ kind: "text-to-print", title: "Little dinosaur", owner: "voice", meta: { projectId } });
 jobs.startStage(job.id, "understand");
@@ -92,56 +91,35 @@ const off = jobs.subscribe(job.id, (e) => …);   // or jobs.subscribeAll(listen
 ```
 
 Events are `{ type: "created" | "updated" | "finished" | "removed" | "restored", job, stageKey? }`.
-`job` is a copy, so listeners can forward it straight to `webContents.send` or an SSE stream. A
-listener that throws is ignored, so a closed portal connection cannot break a print.
+`job` is a copy, so listeners can forward it straight to IPC or an SSE stream. A listener that
+throws is ignored, so a closed portal connection cannot break a print.
 
 Other helpers: `computeJobPercent(stages)`, `deriveJobStatus(stages)`, `isJobFinished(job)`,
-`restoreJobs(snapshot, { interruptWaiting })` (pure), `setMeta(id, patch)`, `remove(id)`,
-`serialize()`, `flush()` (forces a pending debounced save) and `dispose()`. The oldest finished
-jobs beyond `maxFinishedJobs` (default 50) are dropped.
+`restoreJobs(snapshot, { interruptWaiting })` (pure), `stageTemplate(kind, options)`,
+`setMeta(id, patch)`, `remove(id)`, `serialize()`, `flush()` (forces a pending debounced save)
+and `dispose()`. The oldest finished jobs beyond `maxFinishedJobs` (default 50) are dropped.
 
-### Persistence and restarts
+The package does not read or write files and knows nothing about slicing. Mapping slicer
+progress onto the `prepare.*` stages is the app's job: `apps/desktop/electron/printing.ts`
+keeps its own stage map (`load`/`validate` → `prepare.check`, `repair` → `prepare.repair`,
+`place`/`advise` → `prepare.orient`, `slice` → `prepare.slice`, `gx` → `prepare.gx`).
 
-`persist(snapshot)` is called after every change (or coalesced with `persistDebounceMs`).
-`createJobFileStore(path)` writes atomically (temp file + rename) and serialises writes. A missing
-or corrupt file loads as `null`.
+## Persistence and restarts
+
+`JobManager` persists through the `persist(snapshot)` callback you pass in. It is called with
+the full snapshot (`{ version: 1, savedAt, jobs }`, from `serialize()`) after every change, or
+at most once per `persistDebounceMs` when that is above 0 (the default, 0, saves on every
+change). Errors from `persist` go to `onPersistError` and never reach the caller.
+
+The app ([`apps/desktop/electron/jobs.ts`](../apps/desktop/electron/jobs.ts)) keeps one
+`JobManager`. It saves to `<data dir>/database/jobs.json` with `storage.writeAtomic` (temp file
+and rename), debounced to 400 ms. At startup it reads that file, if present, and calls
+`restore()`; a file it cannot read or parse is logged and skipped. Every job event is sent to
+the UI as an app event, and the web portal subscribes to the jobs it shows.
 
 `restore(snapshot)` marks every **running** stage `failed` with `interrupted: true` and the
 error `MX-SYS-006` ("Morphix restarted while this was running"). The job then reads
-`interrupted`. Stages **waiting for the user** are kept by default, so a pending approval survives
-a restart. Pass `{ interruptWaiting: true }` when the app cannot resume them.
-
-### Preparation progress
-
-`trackPrepare(jobs, jobId)` turns `preparePrint` / `prepareWithAdvice` progress into the
-`prepare.*` stages:
-
-```ts
-const t = trackPrepare(jobs, job.id);
-try {
-  const r = await prepareWithAdvice({ inputPath, targetHeightMm: 80, description, onProgress: t.onProgress, options: { outputDir } });
-  t.finish(r);    // completes, skips (slicing off) or fails (MX-SLICE-xxx at the stage that failed)
-} catch (e) {
-  t.fail(e);      // e.g. MeshFormatError -> MX-GEN-008 on the current stage
-}
-```
-
-Mapping: `load`, `validate` → `prepare.check`; `repair` → `prepare.repair`; `place` →
-`prepare.orient`; `advise`, `slice` → `prepare.slice`; `gx` → `prepare.gx`.
-
-## Integration steps (coordinator)
-
-1. **Main process**: create one `JobManager` with `createJobFileStore(~/Morphix/data/jobs.json)`.
-   Call `restore(await store.load())` before any pipeline starts.
-2. **Pipelines**: create a job at the start of each voice/touch/photo request, then call
-   `advance` / `updateStage` from the existing Meshy `onUpdate`, the guardian and the print
-   tracker. Use `trackPrepare` for preparation. On any catch, call
-   `failStage(id, stage, e, "<fallback code>")`.
-3. **Approval**: `waitForUser(id, "approval", …)` when the print is ready. Only the main process
-   completes it, after the touch confirmation or the spoken "yes" that mints `authorizePrint`.
-4. **IPC**: `jobs.subscribeAll((e) => win.webContents.send("jobs:event", e))`, plus
-   `jobs:list` / `jobs:get` handlers that return `jobs.list()` / `jobs.get(id)`.
-5. **Portal**: serve `jobs.list({ owner })` over HTTP and stream `subscribeAll` events over SSE.
-   Filter by owner unless the user is an admin.
-6. **UI**: draw one bar from `job.percent`. Show `stages[*].label` (optionally grouped by
-   `groupLabel`), `detail` under the current stage, and for errors `error.title` + `error.hint`.
+`interrupted`. Stages **waiting for the user** are kept by default, so a pending approval
+survives a restart. Pass `{ interruptWaiting: true }` when the app cannot resume them. A
+snapshot with the wrong version, or malformed jobs in it, are dropped. Error codes are listed
+in [ERRORS.md](ERRORS.md).
