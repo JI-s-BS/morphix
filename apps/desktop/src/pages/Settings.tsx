@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { AppSettings, SystemInfo } from "@morphix/shared";
+import type { AppSettings, CloudStatus, SystemInfo } from "@morphix/shared";
 import { api } from "../bridge";
 import { speakerTest } from "../audio";
 import { NetworkPanel } from "./Network";
@@ -92,6 +92,7 @@ function General({ settings, onError }: { settings: AppSettings | null; onError:
         <h3>🌐 Use it from other devices</h3>
         <div className="muted small">Open <b>{typeof location !== "undefined" && location.protocol.startsWith("http") ? location.origin : "http://<this machine>:8080"}</b> in any browser on the same network and sign in.</div>
       </div>
+      <CloudCard onError={onError} />
       <div className="card">
         <h3>Storage</h3>
         <div className="stat"><span className="muted">Location</span><span className="small">{sys?.storageRoot ?? "–"}</span></div>
@@ -117,6 +118,52 @@ function General({ settings, onError }: { settings: AppSettings | null; onError:
         </div>
         <div className="logs">{logs.join("\n") || "No log entries yet."}</div>
       </div>
+    </div>
+  );
+}
+
+/** Morphix Cloud: pair this machine with a code / QR code, see when it last reported, or disconnect. */
+function CloudCard({ onError }: { onError: (m: string) => void }) {
+  const [cloud, setCloud] = useState<CloudStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.cloudStatus().then(setCloud).catch(() => {});
+    return api.onAppEvent((e) => {
+      if (e.type === "cloud") setCloud(e.status);
+    });
+  }, []);
+  const run = (fn: () => Promise<CloudStatus>) => {
+    setBusy(true);
+    fn().then(setCloud, (e) => onError(String((e as Error).message ?? e))).finally(() => setBusy(false));
+  };
+  const host = cloud ? cloud.url.replace(/^https?:\/\//, "") : "";
+  return (
+    <div className="card">
+      <h3>Morphix Cloud</h3>
+      {!cloud ? <div className="muted small">Loading…</div> : cloud.state === "paired" ? (
+        <>
+          <div className="stat"><span className="muted">Status</span><span style={{ color: "var(--ok)" }}>Connected{cloud.name ? ` as ${cloud.name}` : ""}</span></div>
+          <div className="stat"><span className="muted">Last report</span><span>{cloud.lastReportAt ? new Date(cloud.lastReportAt).toLocaleTimeString() : "–"}</span></div>
+          <div className="muted small" style={{ margin: "6px 0 8px" }}>Status (printer, current print, temperatures) goes to {host} once a minute. Files, keys and the camera stay here.</div>
+          <button className="btn" disabled={busy} onClick={() => run(() => api.cloudUnpair())}>Disconnect</button>
+        </>
+      ) : cloud.state === "pairing" ? (
+        <>
+          <div className="muted small">Scan the QR code with your phone, or sign in at <b>{host}/pair</b> and enter:</div>
+          <div style={{ display: "flex", gap: 14, alignItems: "center", margin: "10px 0" }}>
+            {cloud.qrDataUrl && <img src={cloud.qrDataUrl} alt="QR code to pair this Morphix" style={{ width: 132, height: 132, borderRadius: 8, background: "#fff", padding: 4 }} />}
+            <div style={{ font: "700 26px/1.2 ui-monospace, monospace", letterSpacing: ".12em" }}>{cloud.code}</div>
+          </div>
+          <div className="muted small" style={{ marginBottom: 8 }}>Waiting for you to confirm… The code works for 10 minutes.</div>
+          <button className="btn" disabled={busy} onClick={() => run(() => api.cloudUnpair())}>Cancel</button>
+        </>
+      ) : (
+        <>
+          <div className="muted small" style={{ marginBottom: 8 }}>See this Morphix on your {host} dashboard from anywhere. It only connects out; nothing is opened on your router. (Private preview.)</div>
+          <button className="btn" disabled={busy} onClick={() => run(() => api.cloudPair())}>{busy ? "Getting a code…" : "Pair with Morphix Cloud"}</button>
+        </>
+      )}
+      {cloud?.error && <div className="small" style={{ color: "var(--warn)", marginTop: 8 }}>{cloud.error}</div>}
     </div>
   );
 }

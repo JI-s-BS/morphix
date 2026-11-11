@@ -224,6 +224,22 @@ export type VoiceEvent =
   | { type: "turn-complete"; user: AssistantTurn | null; assistant: AssistantTurn | null }
   | { type: "error"; message: string };
 
+/** Morphix Cloud link (Settings → Morphix Cloud). Never includes the device secret. */
+export interface CloudStatus {
+  state: "off" | "pairing" | "paired";
+  url: string;
+  /** While pairing: the code to type on the cloud site, and a QR code of its /pair page. */
+  code?: string;
+  pairUrl?: string;
+  qrDataUrl?: string | null;
+  expiresAt?: string;
+  /** When paired. */
+  name?: string | null;
+  pairedAt?: string;
+  lastReportAt?: string | null;
+  error?: string | null;
+}
+
 export type AppEvent =
   | { type: "pending"; action: PendingAction | null }
   | { type: "navigate"; page: "viewer" | "library" | "assistant" | "prepare" | "printer" | "control"; projectId?: string }
@@ -235,7 +251,8 @@ export type AppEvent =
   | { type: "smart-search"; state: SmartSearchState }
   | { type: "engine-choice"; choice: EngineChoice | null }
   | { type: "claude-design"; design: ClaudeDesignView }
-  | { type: "guardian"; snapshot: GuardianView };
+  | { type: "guardian"; snapshot: GuardianView }
+  | { type: "cloud"; status: CloudStatus };
 
 /** Progress of one pipeline (text→print, photo→print, prepare, print) for the progress bar. */
 export interface JobView {
@@ -481,6 +498,11 @@ export interface MorphixApi {
   guardianAnswer(decision: "stop" | "keep"): Promise<{ ok: boolean; message: string }>;
   /** Speak a pretend warning to test audio and answers. Never sends printer commands. */
   guardianSimulate(): Promise<{ ok: boolean; message: string }>;
+
+  /** Morphix Cloud: status, start pairing (shows a code + QR), or forget the link. */
+  cloudStatus(): Promise<CloudStatus>;
+  cloudPair(): Promise<CloudStatus>;
+  cloudUnpair(): Promise<CloudStatus>;
 
   networkStatus(): Promise<NetworkStatus>;
   wifiScan(): Promise<WifiNetwork[]>;

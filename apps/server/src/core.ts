@@ -36,6 +36,7 @@ import { findPrinter } from "@morphix/catalog";
 import type { SlicerAdapter } from "@morphix/slicing";
 import { DriverControl, DriverObserver, resolveActivePrinter, type ActivePrinter } from "./printers";
 import { createDriverSlicer, installedAdapters } from "./slicers";
+import { CloudLink, DEFAULT_CLOUD_URL } from "./cloud";
 
 export interface CoreOptions {
   /** Data dir (Storage root). */
@@ -639,6 +640,32 @@ export async function createCore(o: CoreOptions): Promise<Core> {
     return { ok: true, message: "Test warning started. Listen, then answer out loud (hold the mic) or tap a button. No printer commands are sent." };
   });
 
+  // Morphix Cloud (outgoing only): pairing by code / QR, then a small status report every minute.
+  const cloud = new CloudLink({
+    dataDir: storage.root,
+    url: env("MORPHIX_CLOUD_URL") || DEFAULT_CLOUD_URL,
+    version: o.version,
+    name: () => (active.kind === "driver" ? active.printer.name : "Morphix"),
+    report: () => {
+      const s = printer.status;
+      const p = printing.status();
+      return {
+        online: s.online,
+        state: p.job?.phase ?? (s.online ? (s.machine === "READY" ? "idle" : (s.machine ?? "").toLowerCase() || "online") : "offline"),
+        printer: active.kind === "driver" ? `${model?.brand ?? ""} ${model?.model ?? active.printer.modelId}`.trim() : "Afinia QD330",
+        file: p.job?.fileName,
+        progress: p.job?.progress,
+        nozzleC: s.temps?.nozzle?.current,
+        bedC: s.temps?.bed?.current,
+      };
+    },
+    onChange: (status) => ctx.event({ type: "cloud", status }),
+    log: (level, message, extra) => log.write(level, message, extra),
+  });
+  handle(IPC.cloudStatus, () => cloud.status());
+  handle(IPC.cloudPair, () => cloud.pair());
+  handle(IPC.cloudUnpair, () => cloud.unpair());
+
   // Network (Wi-Fi only; NetworkManager on the host)
   handle(IPC.networkStatus, () => network.status());
   handle(IPC.wifiScan, () => network.scan());
@@ -692,6 +719,7 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       // Self-healing: safe automatic fixes (never prints, heats, cancels a print or spends credits). docs/SELF-HEAL.md
       installSelfHealing(appSelfHealDeps({ log, emit: ctx.event, jobs, printer, printing, voice, generation, db: () => ctx.db, storage, pollMs: POLL_SECONDS * 1000 }));
       if (resumable.length && meshy) generation.resume(resumable);
+      cloud.startHeartbeat(); // no-op unless paired
       const latest = ctx.db.get("SELECT id FROM projects ORDER BY updated_at DESC LIMIT 1");
       ctx.currentProjectId = latest ? String(latest.id) : null;
       if (localTts.available) {
@@ -702,6 +730,7 @@ export async function createCore(o: CoreOptions): Promise<Core> {
       }
     },
     async stop() {
+      cloud.stop();
       printer.stop();
       if (backupTimer) clearInterval(backupTimer);
       stopBusy?.();

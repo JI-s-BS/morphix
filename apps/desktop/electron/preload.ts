@@ -68,6 +68,9 @@ const api: MorphixApi = {
   guardianAnswer: (decision) => ipcRenderer.invoke(IPC.guardianAnswer, decision),
   guardianSimulate: () => ipcRenderer.invoke(IPC.guardianSimulate),
 
+  cloudStatus: () => ipcRenderer.invoke(IPC.cloudStatus),
+  cloudPair: () => ipcRenderer.invoke(IPC.cloudPair),
+  cloudUnpair: () => ipcRenderer.invoke(IPC.cloudUnpair),
   networkStatus: () => ipcRenderer.invoke(IPC.networkStatus),
   wifiScan: () => ipcRenderer.invoke(IPC.wifiScan),
   wifiConnect: (ssid, password) => ipcRenderer.invoke(IPC.wifiConnect, ssid, password),
