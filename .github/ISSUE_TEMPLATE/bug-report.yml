@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in Morphix doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "**Never paste API keys, passwords or printer access codes.** Use placeholders."
+  - type: textarea
+    id: what
+    attributes: { label: What happened, description: "What you did, what you expected, what happened instead. Include any error code (MX-…)." }
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes: { label: Steps to reproduce, placeholder: "1. …\n2. …" }
+  - type: input
+    id: version
+    attributes: { label: Morphix version, description: "`morphix version`, or the commit if you run from source" }
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is Morphix installed?
+      options: ["One-line installer (system service)", "Installer --user", "Docker", "From source", "Electron kiosk"]
+  - type: input
+    id: system
+    attributes: { label: Machine and OS, placeholder: "Raspberry Pi 5, Raspberry Pi OS Bookworm 64-bit" }
+  - type: input
+    id: printer
+    attributes: { label: Printer and connection (if relevant), placeholder: "Creality K1C, creality-k1" }
+  - type: textarea
+    id: doctor
+    attributes: { label: "`morphix doctor` output (optional)", render: text }

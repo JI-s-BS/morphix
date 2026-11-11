@@ -331,3 +331,28 @@ label.btn.disabled { opacity: .5; pointer-events: none; }
 /* Z offset on the Prepare page */
 .z-offset .btn { min-height: 48px; padding: 0 14px; }
 .z-value { font-size: 20px; min-width: 84px; text-align: center; }
+
+/* ---- Phones and narrow windows (the server's website): one column, tabs at the bottom. ---- */
+@media (max-width: 720px) {
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+  .topbar { grid-column: 1; grid-row: 1; flex-wrap: wrap; gap: 6px; padding: 6px 10px; min-height: 48px; }
+  .brand { font-size: 20px; }
+  .chip { font-size: 12px; padding: 3px 9px; }
+  .top-voice { display: none; }
+  .content { grid-row: 2; overflow-y: auto; padding: 10px; }
+  .rail { grid-row: 3; flex-direction: row; justify-content: space-around; gap: 2px; padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    border-right: 0; border-top: 1px solid var(--line); }
+  .rail .spacer { display: none; }
+  .rail button { height: 58px; flex: 1; min-width: 0; border-radius: 14px; font-size: 11px; }
+  .rail .emoji { font-size: 24px; }
+  .page { height: auto; min-height: 100%; }
+  .assistant-page, .viewer, .printer, .prepare { grid-template-columns: 1fr; height: auto; }
+  .canvas-wrap { min-height: 52vh; }
+  .settings-grid, .size-grid { grid-template-columns: 1fr; }
+  .result-grid { grid-template-columns: repeat(2, 1fr); }
+  .engine-options { grid-template-columns: 1fr; }
+  .ctl-grid { grid-template-columns: 1fr 1fr; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .jobbar-track { width: 90px; }
+  .voice-bubble { left: 10px; right: 10px; max-width: none; }
+}

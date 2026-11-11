@@ -47,6 +47,21 @@ Two independent guards apply: the workflow guard in [packages/domain](../package
 protects the job state (`printControlsEnabled` and `userApproved`), and the controller guard in
 [control.ts](../packages/printer/src/control.ts) protects the printer. Keep both.
 
+### Printers from the setup page
+
+A printer added on the setup page (any driver other than the built-in QD330 path) is controlled
+through its `PrinterDriver` ([apps/server/src/printers.ts](../apps/server/src/printers.ts),
+[printing.ts](../apps/desktop/electron/printing.ts)). Adding it and passing **Test connection** is
+the operator's decision to let Morphix talk to it. After that, the same rules hold:
+
+- A print is only proposed when the printer is `idle` and its driver can upload and start files. At
+  **Confirm** the printer is polled again, and nothing is sent unless it is still idle.
+- Pause only while printing, resume only while paused, cancel only with a job.
+- Temperatures are clamped to the catalog model's limits and refused during a print, for an unknown
+  model, or while the printer is offline.
+- Start is confirmed by the printer's status; silence is reported as "hasn't reported printing yet".
+- Drivers marked `verified: "protocol"` have not been run on that printer. Watch the first print.
+
 ## Approval before every print
 
 Anything that starts or resumes a print needs a `PrintAuthorization`

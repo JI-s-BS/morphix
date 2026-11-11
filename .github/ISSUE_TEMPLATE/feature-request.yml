@@ -1,0 +1,11 @@
+name: Idea or feature request
+description: Something Morphix should do, or a printer / slicer it should support.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: idea
+    attributes: { label: The idea, description: "What would you like Morphix to do, and why?" }
+    validations: { required: true }
+  - type: textarea
+    id: context
+    attributes: { label: Anything else, description: "Printer model, links to protocol docs, sketches…" }

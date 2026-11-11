@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/JI-s-BS/morphix/security/advisories/new
+    about: Please report security problems privately, not as an issue.
+  - name: Devpost project
+    url: https://devpost.com/software/morphix-kbzot2
+    about: The SharkByte 2026 story, photos and demo video.

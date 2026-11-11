@@ -207,6 +207,8 @@ export class DriverControl {
     if (!set || !this.conn.capabilities().setTemperature || !lim) return { ok: false, message: "This control isn't available for this printer yet. Use the printer's screen." };
     const s = await this.fresh();
     if (!s || s.state === "offline") return { ok: false, message: "The printer is offline." };
+    // docs/SAFETY.md rule 1: no temperature changes during a print (cool-down after cancelling is from idle).
+    if (["printing", "paused", "heating", "finishing", "busy"].includes(s.state)) return { ok: false, message: `The printer is ${s.state}. Temperatures can't be changed during a print.` };
     const clamp = (v: number, max: number) => Math.max(0, Math.min(max, Math.round(v)));
     switch (c.cmd) {
       case "nozzle":

@@ -135,6 +135,13 @@ describe("DriverControl", () => {
     expect(conn.calls.some((c) => c.startsWith("start") || c === "upload")).toBe(false);
   });
 
+  it("refuses temperature changes during a print", async () => {
+    const { conn, ctl } = setup();
+    conn.state = { state: "printing", checkedAt: "t" };
+    expect(await ctl.machine({ cmd: "nozzle", celsius: 200 })).toMatchObject({ ok: false, message: expect.stringMatching(/during a print/) });
+    expect(conn.calls.some((c) => c.startsWith("temp"))).toBe(false);
+  });
+
   it("refuses temperatures for an unknown model or an offline printer", async () => {
     const conn = new FakeConnection({});
     const ctl = new DriverControl(conn, { ...garage, modelId: "nobody-knows" }, new DriverObserver(conn, () => {}));
