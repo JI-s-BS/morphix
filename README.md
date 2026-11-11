@@ -294,7 +294,8 @@ The original hackathon hardware was a Raspberry Pi 4 with a 1024×600 touchscree
 
 ## Security
 
-- **Built for a home or school network.** Don't forward it to the internet. For remote access, use a VPN such as Tailscale or WireGuard.
+- **Built for a home or school network.** To use it from anywhere, follow **[docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md)**: Tailscale,
+  Cloudflare Tunnel, your own server as a reverse proxy, or (last resort) port forwarding with HTTPS.
 - Sign-in is required for everything except the page itself and `/api/health`. Accounts are `admin` or `user`; only admins change settings.
 - Every request that changes something needs a per-session CSRF token and must come from Morphix's own page. Strict security headers
   (CSP, `X-Frame-Options: DENY`, `nosniff`), request size limits and per-IP rate limits apply; sign-in has its own lockout.
@@ -334,7 +335,8 @@ Yes. Everyone opens the same address. The admin can add `user` accounts that can
 
 <details><summary><b>Can I use it away from home?</b></summary>
 
-Use a VPN (Tailscale, WireGuard) and open the same address. Don't forward the port to the internet.
+Yes: see **[docs/REMOTE-ACCESS.md](docs/REMOTE-ACCESS.md)**. The easiest safe way is Tailscale (a private VPN, nothing exposed);
+Cloudflare Tunnel or your own server give you a real web address; port forwarding works but needs HTTPS and care.
 </details>
 
 <details><summary><b>My printer isn't listed.</b></summary>
